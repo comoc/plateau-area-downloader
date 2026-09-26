@@ -105,6 +105,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         private Label previewResult;
         private Label meshSummary;
         private Label mapLegend;
+        private Label downloadSummary;
         private Label progressLabel;
         private Label handoffResult;
         private VisualElement handoffCities;
@@ -183,6 +184,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             previewResult = Q<Label>("preview-result");
             meshSummary = Q<Label>("mesh-summary");
             mapLegend = Q<Label>("map-legend");
+            downloadSummary = Q<Label>("download-summary");
             progressLabel = Q<Label>("progress");
             handoffResult = Q<Label>("handoff-result");
             handoffCities = Q<VisualElement>("handoff-cities");
@@ -240,12 +242,13 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 field.RegisterValueChangedCallback(e =>
                 {
                     EditorPrefs.SetString(Prefs + name.Split('-')[0], e.newValue);
-                    if (name == "api-url" || name == "save-root") InvalidatePreview();
+                    if (name == "api-url") InvalidatePreview();
                 });
             }
             WriteBounds();
             RefreshMap();
             if (desired != null) ShowPreviewResult(desired);
+            UpdateDownloadSelection();
         }
 
         private T Q<T>(string name) where T : VisualElement => rootVisualElement.Q<T>(name);
@@ -343,9 +346,20 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             downloadedDataRoot = null;
             handoffCities?.Clear();
             if (handoffResult != null) handoffResult.text = "対象が変わりました。取得後にフォルダを表示します。";
-            previewResult.text = "対象を調べ直してください。";
-            meshSummary.text = "範囲または種類を変更しました。取得区画を調べ直してください。";
+            previewResult.text = "CityGMLファイルを再検索してください。";
+            meshSummary.text = "範囲または種類を変更しました。検索結果を更新してください。";
+            UpdateDownloadSelection();
             RefreshOverlay();
+        }
+
+        private void UpdateDownloadSelection()
+        {
+            if (downloadSummary == null) return;
+            downloadSummary.text = desired == null
+                ? "CityGMLファイルを検索するとダウンロードできます。"
+                : "ダウンロード対象: " + desired.selectedGmls.Length + " CityGMLファイル / GML " +
+                  FormatBytes(desired.gmlBytes);
+            Q<Button>("download").SetEnabled(desired != null && operation == null);
         }
 
         private async void Preview()
@@ -354,15 +368,16 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             var requestedBounds = bounds;
             var types = new[] { "bldg", "tran", "dem" }.Where(type => Q<Toggle>(type).value).ToArray();
             desired = null;
+            UpdateDownloadSelection();
             RefreshOverlay();
             if (types.Length == 0)
             {
                 previewResult.text = "建築物・道路・地形から選んでください。";
-                meshSummary.text = "取得するデータを選んでください。";
+                meshSummary.text = "検索するデータ種別を選んでください。";
                 return;
             }
-            previewResult.text = "カタログを確認中…";
-            meshSummary.text = "取得区画とファイル数を照会中…";
+            previewResult.text = "CityGMLファイルを検索中…";
+            meshSummary.text = "対象区画とファイル数を照会中…";
             try
             {
                 var cities = await PlateauApi.SearchCityGmlAsync(requestedBounds.West, requestedBounds.South,
@@ -383,14 +398,16 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 desired = PackDownloader.CreateManifest(placeName, requestedBounds.West, requestedBounds.South,
                     requestedBounds.East, requestedBounds.North, selected, ApiBase);
                 ShowPreviewResult(desired);
+                UpdateDownloadSelection();
                 RefreshOverlay();
             }
             catch (Exception error)
             {
                 if (generation != previewGeneration) return;
                 desired = null;
-                previewResult.text = "カタログ取得に失敗しました: " + error.Message;
+                previewResult.text = "CityGMLファイルの検索に失敗しました: " + error.Message;
                 meshSummary.text = "取得区画を確認できませんでした。";
+                UpdateDownloadSelection();
                 RefreshOverlay();
             }
         }
@@ -430,7 +447,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
 
         private async void Download()
         {
-            if (desired == null) { progressLabel.text = "先に対象を調べてください。"; return; }
+            if (desired == null) { progressLabel.text = "先にCityGMLファイルを検索してください。"; return; }
             if (operation != null) { progressLabel.text = "別の処理を実行中です。"; return; }
             try
             {
@@ -443,6 +460,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 EditorPrefs.SetFloat(Prefs + "downloadLimit", downloadLimit);
                 EditorPrefs.SetFloat(Prefs + "expandedLimit", expandedLimit);
                 operation = new CancellationTokenSource();
+                UpdateDownloadSelection();
                 var limits = new PackLimits
                 {
                     MaxDownloadBytes = (long)(downloadLimit * 1024d * 1024 * 1024),
@@ -452,22 +470,23 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                     step => progressQueue.Enqueue(step), operation.Token);
                 if (generation != previewGeneration || desired != requested)
                 {
-                    progressLabel.text = "旧条件の取得が完了しました。現在の範囲は調べ直してください。";
+                    progressLabel.text = "旧条件のダウンロードが完了しました。現在の範囲は再検索してください。";
                     return;
                 }
                 downloaded = completed;
                 downloadedDataRoot = dataRoot;
-                progressLabel.text = "取得完了: " + downloaded.files.Length + "ファイル / ZIP " +
+                progressLabel.text = "ダウンロード完了: " + downloaded.files.Length + "ファイル / ZIP " +
                     FormatBytes(downloaded.zipBytes) + " / 展開後 " + FormatBytes(downloaded.expandedBytes);
                 ShowHandoffCities();
             }
-            catch (OperationCanceledException) { progressLabel.text = "取得を中断しました。再度「取得する」で確認・再開できます。"; }
-            catch (Exception error) { progressLabel.text = "取得失敗: " + error.Message; }
+            catch (OperationCanceledException) { progressLabel.text = "ダウンロードを中断しました。再度「CityGMLをダウンロード」で確認・再開できます。"; }
+            catch (Exception error) { progressLabel.text = "ダウンロード失敗: " + error.Message; }
             finally
             {
                 while (progressQueue.TryDequeue(out _)) { }
                 operation?.Dispose();
                 operation = null;
+                UpdateDownloadSelection();
             }
         }
 

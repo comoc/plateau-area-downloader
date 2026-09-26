@@ -3,28 +3,48 @@
   <ui:ScrollView name="scroll" class="page">
     <ui:Label text="PLATEAU Area Downloader" class="title" />
     <ui:Label text="施設を探して範囲を選び、CityGMLを取得して公式PLATEAU SDKに渡します。" />
-    <ui:VisualElement class="row">
-      <ui:TextField name="search" label="施設名" class="grow" />
-      <ui:Button name="search-button" text="検索" />
-    </ui:VisualElement>
-    <ui:VisualElement name="candidates" />
-    <ui:Label text="既定の検索先: Photon（© OpenStreetMap contributors）" />
     <ui:VisualElement class="section">
-      <ui:Label text="範囲と地図" class="heading" />
+      <ui:Label text="1. 場所を探す（任意）" class="heading" />
+      <ui:VisualElement class="row">
+        <ui:TextField name="search" label="施設名" class="grow" />
+        <ui:Button name="search-button" text="検索" />
+      </ui:VisualElement>
+      <ui:VisualElement name="candidates" />
+      <ui:Label text="既定の検索先: Photon（© OpenStreetMap contributors）" />
+    </ui:VisualElement>
+    <ui:VisualElement class="section">
+      <ui:Label text="2. 範囲とデータ種別を選ぶ" class="heading" />
       <ui:Label text="ドラッグで移動、ホイールで拡大縮小、Shift＋ドラッグで範囲選択できます。" />
       <ui:VisualElement class="row zoom-controls">
         <ui:Label text="拡大縮小の速さ" />
         <ui:SliderInt name="zoom-sensitivity" low-value="25" high-value="300" value="100" style="flex-grow: 1; flex-shrink: 1; min-width: 240px;" />
         <ui:Label name="zoom-sensitivity-value" text="100%" />
       </ui:VisualElement>
-      <ui:Label name="mesh-summary" text="施設の検索候補を選ぶと取得区画を自動照会します。地図や座標で範囲を変えた場合は「対象を調べる」を押してください。" class="map-summary" />
-      <ui:VisualElement name="map" class="map">
-        <ui:VisualElement name="tiles" class="map-layer" />
-        <ui:VisualElement name="mesh-overlay" class="map-layer" />
-        <ui:VisualElement name="bounds-overlay" class="map-layer" />
-        <ui:Label text="地理院タイル（国土地理院）" class="attribution" />
+      <ui:VisualElement class="map-workspace">
+        <ui:VisualElement class="map-column">
+          <ui:VisualElement name="map" class="map">
+            <ui:VisualElement name="tiles" class="map-layer" />
+            <ui:VisualElement name="mesh-overlay" class="map-layer" />
+            <ui:VisualElement name="bounds-overlay" class="map-layer" />
+            <ui:Label text="地理院タイル（国土地理院）" class="attribution" />
+          </ui:VisualElement>
+          <ui:Label name="map-legend" text="青: 指定範囲　紫: 取得対象の区画（照会後に表示）" class="map-legend" />
+        </ui:VisualElement>
+        <ui:VisualElement class="map-side-panel">
+          <ui:Label text="CityGMLファイルを検索" class="heading" />
+          <ui:Label text="検索するデータ種別" />
+          <ui:VisualElement class="map-choices">
+            <ui:Toggle name="bldg" text="建築物" value="true" />
+            <ui:Toggle name="tran" text="道路" />
+            <ui:Toggle name="dem" text="地形" />
+          </ui:VisualElement>
+          <ui:Button name="preview" text="CityGMLファイルを検索" class="primary-action map-search-button" />
+          <ui:ScrollView class="map-query-results">
+            <ui:Label name="mesh-summary" text="施設の検索候補を選ぶと、範囲内のCityGMLファイルを自動で検索します。範囲や種別を変えた場合は、再検索してください。" class="map-summary" />
+            <ui:Label name="preview-result" text="範囲とデータ種別を選び、CityGMLファイルを検索してください。" class="result" />
+          </ui:ScrollView>
+        </ui:VisualElement>
       </ui:VisualElement>
-      <ui:Label name="map-legend" text="青: 指定範囲　紫: 取得対象の区画（照会後に表示）" class="map-legend" />
       <ui:VisualElement class="row">
         <ui:DoubleField name="west" label="西経度" class="coordinate" />
         <ui:DoubleField name="south" label="南緯度" class="coordinate" />
@@ -32,29 +52,28 @@
       <ui:VisualElement class="row">
         <ui:DoubleField name="east" label="東経度" class="coordinate" />
         <ui:DoubleField name="north" label="北緯度" class="coordinate" />
+      </ui:VisualElement>
+      <ui:VisualElement class="row coordinate-actions">
         <ui:Button name="apply-bounds" text="反映" />
       </ui:VisualElement>
     </ui:VisualElement>
     <ui:VisualElement class="section">
-      <ui:Label text="取得するデータ" class="heading" />
-      <ui:VisualElement class="row choices">
-        <ui:Toggle name="bldg" text="建築物" value="true" />
-        <ui:Toggle name="tran" text="道路" />
-        <ui:Toggle name="dem" text="地形" />
-        <ui:Button name="preview" text="対象を調べる" />
-      </ui:VisualElement>
-      <ui:Label name="preview-result" text="範囲を決めて「対象を調べる」を押してください。" class="result" />
+      <ui:Label text="3. CityGMLファイルをダウンロード" class="heading" />
+      <ui:Label name="download-summary" text="CityGMLファイルを検索するとダウンロードできます。" class="download-summary" />
+      <ui:Label text="選択範囲と交差するファイル全体と参照データを保存します。付属データを含む容量は検索時点では不明です。" class="result" />
       <ui:TextField name="save-root" label="保存先" />
       <ui:VisualElement class="row">
-        <ui:FloatField name="download-limit" label="取得上限 GiB" class="limit" />
+        <ui:FloatField name="download-limit" label="ダウンロード上限 GiB" class="limit" />
         <ui:FloatField name="expanded-limit" label="展開上限 GiB" class="limit" />
-        <ui:Button name="download" text="取得する" />
+      </ui:VisualElement>
+      <ui:VisualElement class="row download-actions">
+        <ui:Button name="download" text="CityGMLをダウンロード" class="primary-action download-action" />
         <ui:Button name="cancel" text="中断" />
       </ui:VisualElement>
       <ui:Label name="progress" text="待機中" class="result" />
     </ui:VisualElement>
     <ui:VisualElement class="section">
-      <ui:Label text="公式PLATEAU SDKへ渡す" class="heading" />
+      <ui:Label text="4. 公式PLATEAU SDKへ渡す" class="heading" />
       <ui:Label text="都市ごとのフォルダを公式SDKの「都市の追加 → ローカル → 入力フォルダ → 参照...」で選んでください。範囲と読み込み設定はSDKで指定します。" class="result" />
       <ui:VisualElement name="handoff-cities" />
       <ui:Label name="handoff-result" text="取得完了後に都市別フォルダを表示します。" class="result" />
