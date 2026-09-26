@@ -1,0 +1,13 @@
+.page { padding-left: 12px; padding-right: 12px; padding-top: 10px; padding-bottom: 20px; }
+.title { font-size: 18px; -unity-font-style: bold; margin-bottom: 6px; }
+.heading { font-size: 14px; -unity-font-style: bold; margin-bottom: 5px; }
+.section { margin-top: 12px; padding: 10px; border-left-width: 1px; border-right-width: 1px; border-top-width: 1px; border-bottom-width: 1px; border-left-color: #555; border-right-color: #555; border-top-color: #555; border-bottom-color: #555; }
+.row { flex-direction: row; align-items: center; margin-top: 5px; margin-bottom: 5px; }
+.row > * { margin-right: 8px; }
+.grow { flex-grow: 1; }
+.coordinate { min-width: 130px; flex-grow: 1; }
+.limit { min-width: 180px; }
+.map { height: 430px; overflow: hidden; background-color: #c1ced0; margin-top: 6px; margin-bottom: 4px; }
+.map-layer { position: absolute; left: 0; right: 0; top: 0; bottom: 0; }
+.attribution { position: absolute; right: 5px; bottom: 5px; background-color: #ffffffdd; color: #222; padding-left: 4px; padding-right: 4px; }
+.result { white-space: normal; margin-top: 5px; margin-bottom: 5px; }

@@ -1,0 +1,74 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+  <ui:Style src="AreaWindow.uss" />
+  <ui:ScrollView name="scroll" class="page">
+    <ui:Label text="PLATEAU Area Downloader" class="title" />
+    <ui:Label text="施設を探して範囲を選び、CityGMLを取得してから読み込みます。" />
+    <ui:VisualElement class="row">
+      <ui:TextField name="search" label="施設名" class="grow" />
+      <ui:Button name="search-button" text="検索" />
+    </ui:VisualElement>
+    <ui:VisualElement name="candidates" />
+    <ui:Label text="既定の検索先: Photon（© OpenStreetMap contributors）" />
+    <ui:VisualElement class="section">
+      <ui:Label text="範囲と地図" class="heading" />
+      <ui:Label text="地図はドラッグで移動、ホイールで拡大縮小、Shift＋ドラッグで範囲選択できます。" />
+      <ui:VisualElement name="map" class="map">
+        <ui:VisualElement name="tiles" class="map-layer" />
+        <ui:VisualElement name="mesh-overlay" class="map-layer" />
+        <ui:VisualElement name="bounds-overlay" class="map-layer" />
+        <ui:Label text="地理院タイル（国土地理院）" class="attribution" />
+      </ui:VisualElement>
+      <ui:Label name="map-legend" text="青: 指定範囲　橙: 取得対象メッシュ　緑: SDK取込範囲" />
+      <ui:VisualElement class="row">
+        <ui:DoubleField name="west" label="西経度" class="coordinate" />
+        <ui:DoubleField name="south" label="南緯度" class="coordinate" />
+      </ui:VisualElement>
+      <ui:VisualElement class="row">
+        <ui:DoubleField name="east" label="東経度" class="coordinate" />
+        <ui:DoubleField name="north" label="北緯度" class="coordinate" />
+        <ui:Button name="apply-bounds" text="反映" />
+      </ui:VisualElement>
+    </ui:VisualElement>
+    <ui:VisualElement class="section">
+      <ui:Label text="取得するデータ" class="heading" />
+      <ui:VisualElement class="row">
+        <ui:Toggle name="bldg" label="建築物" value="true" />
+        <ui:Toggle name="tran" label="道路" />
+        <ui:Toggle name="dem" label="地形" />
+        <ui:Button name="preview" text="対象を調べる" />
+      </ui:VisualElement>
+      <ui:Label name="preview-result" text="範囲を決めて「対象を調べる」を押してください。" class="result" />
+      <ui:IntegerField name="zone" label="平面直角座標系の系番号 (1～19)" />
+      <ui:TextField name="save-root" label="保存先" />
+      <ui:VisualElement class="row">
+        <ui:FloatField name="download-limit" label="取得上限 GiB" class="limit" />
+        <ui:FloatField name="expanded-limit" label="展開上限 GiB" class="limit" />
+        <ui:Button name="download" text="取得する" />
+        <ui:Button name="cancel" text="中断" />
+      </ui:VisualElement>
+      <ui:Label name="progress" text="待機中" class="result" />
+    </ui:VisualElement>
+    <ui:VisualElement class="section">
+      <ui:Label text="SDKで読み込む" class="heading" />
+      <ui:VisualElement class="row">
+        <ui:IntegerField name="min-lod" label="最小LOD" class="limit" />
+        <ui:IntegerField name="max-lod" label="最大LOD" class="limit" />
+        <ui:EnumField name="granularity" label="モデルの結合単位" class="grow" />
+      </ui:VisualElement>
+      <ui:VisualElement class="row">
+        <ui:Toggle name="texture" label="テクスチャ" value="true" />
+        <ui:Toggle name="collider" label="Collider" value="true" />
+        <ui:Toggle name="attributes" label="属性情報" value="true" />
+      </ui:VisualElement>
+      <uie:ObjectField name="existing-origin" label="既存都市モデルの原点を使う" />
+      <ui:Button name="import" text="インポート" />
+      <ui:Label name="import-result" text="取得完了後にインポートできます。" class="result" />
+    </ui:VisualElement>
+    <ui:VisualElement class="section">
+      <ui:Label text="接続先" class="heading" />
+      <ui:TextField name="photon-url" label="Photon" />
+      <ui:TextField name="api-url" label="CityGML API" />
+      <ui:TextField name="tiles-url" label="地図タイル" />
+    </ui:VisualElement>
+  </ui:ScrollView>
+</ui:UXML>

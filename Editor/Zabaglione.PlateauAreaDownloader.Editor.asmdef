@@ -1,0 +1,11 @@
+{
+  "name": "Zabaglione.PlateauAreaDownloader.Editor",
+  "rootNamespace": "Zabaglione.PlateauAreaDownloader.Editor",
+  "references": [
+    "PLATEAU.Runtime",
+    "libplateau"
+  ],
+  "includePlatforms": ["Editor"],
+  "allowUnsafeCode": false,
+  "autoReferenced": true
+}

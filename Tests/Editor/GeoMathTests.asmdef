@@ -1,0 +1,10 @@
+{
+  "name": "Zabaglione.PlateauAreaDownloader.Editor.Tests",
+  "rootNamespace": "Zabaglione.PlateauAreaDownloader.Editor.Tests",
+  "references": [
+    "Zabaglione.PlateauAreaDownloader.Editor"
+  ],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "autoReferenced": false
+}
