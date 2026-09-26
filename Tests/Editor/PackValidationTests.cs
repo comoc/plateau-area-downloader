@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Security.Cryptography;
@@ -34,6 +35,41 @@ namespace Zabaglione.PlateauAreaDownloader.Editor.Tests
             Assert.Throws<IOException>(() => PackDownloader.ExtractSafe(zip,
                 Path.Combine(root, "dataset"), 1024, null, CancellationToken.None));
             Assert.That(File.Exists(Path.Combine(root, "outside.txt")), Is.False);
+        }
+
+        [Test]
+        public void ExtractThenValidate_ReportsWorkAfterExpansionCompletes()
+        {
+            Directory.CreateDirectory(root);
+            var zip = Path.Combine(root, "sample.zip");
+            var city = "sample_city_2025_citygml_1_op";
+            var gmlName = "53393599_bldg_test.gml";
+            using (var archive = ZipFile.Open(zip, ZipArchiveMode.Create))
+            {
+                using (var writer = new StreamWriter(archive.CreateEntry(city + "/udx/bldg/" + gmlName).Open()))
+                    writer.Write("<root><entry codeSpace=\"../../codelists/values.xml\" /></root>");
+                using (var writer = new StreamWriter(archive.CreateEntry(city + "/codelists/values.xml").Open()))
+                    writer.Write("<values />");
+            }
+
+            var stages = new List<PackProgress>();
+            var dataset = Path.Combine(root, "dataset");
+            var files = PackDownloader.ExtractSafe(zip, dataset, 1024 * 1024, stages.Add,
+                CancellationToken.None);
+            Assert.That(files.Length, Is.EqualTo(2));
+            var expanded = stages[stages.Count - 1];
+            Assert.That(expanded.Stage, Is.EqualTo("extracting"));
+            Assert.That(expanded.Bytes, Is.EqualTo(expanded.TotalBytes));
+
+            PackDownloader.ValidateReferences(dataset, new[] { new SelectedGml
+            {
+                cityRoot = city, type = "bldg",
+                url = "https://example.invalid/udx/bldg/" + gmlName
+            } }, CancellationToken.None, stages.Add);
+            var validated = stages[stages.Count - 1];
+            Assert.That(validated.Stage, Is.EqualTo("validating-references"));
+            Assert.That(validated.FilesCompleted, Is.EqualTo(1));
+            Assert.That(validated.ReferencesChecked, Is.EqualTo(1));
         }
 
         [Test]

@@ -12,13 +12,19 @@
     <ui:VisualElement class="section">
       <ui:Label text="範囲と地図" class="heading" />
       <ui:Label text="ドラッグで移動、ホイールで拡大縮小、Shift＋ドラッグで範囲選択できます。" />
+      <ui:VisualElement class="row zoom-controls">
+        <ui:Label text="拡大縮小の速さ" />
+        <ui:SliderInt name="zoom-sensitivity" low-value="25" high-value="300" value="100" style="flex-grow: 1; flex-shrink: 1; min-width: 240px;" />
+        <ui:Label name="zoom-sensitivity-value" text="100%" />
+      </ui:VisualElement>
+      <ui:Label name="mesh-summary" text="施設の検索候補を選ぶと取得区画を自動照会します。地図や座標で範囲を変えた場合は「対象を調べる」を押してください。" class="map-summary" />
       <ui:VisualElement name="map" class="map">
         <ui:VisualElement name="tiles" class="map-layer" />
         <ui:VisualElement name="mesh-overlay" class="map-layer" />
         <ui:VisualElement name="bounds-overlay" class="map-layer" />
         <ui:Label text="地理院タイル（国土地理院）" class="attribution" />
       </ui:VisualElement>
-      <ui:Label name="map-legend" text="青: 指定範囲　橙: 取得対象ファイルの範囲（先頭100件まで表示）" />
+      <ui:Label name="map-legend" text="青: 指定範囲　紫: 取得対象の区画（照会後に表示）" class="map-legend" />
       <ui:VisualElement class="row">
         <ui:DoubleField name="west" label="西経度" class="coordinate" />
         <ui:DoubleField name="south" label="南緯度" class="coordinate" />
@@ -31,10 +37,10 @@
     </ui:VisualElement>
     <ui:VisualElement class="section">
       <ui:Label text="取得するデータ" class="heading" />
-      <ui:VisualElement class="row">
-        <ui:Toggle name="bldg" label="建築物" value="true" />
-        <ui:Toggle name="tran" label="道路" />
-        <ui:Toggle name="dem" label="地形" />
+      <ui:VisualElement class="row choices">
+        <ui:Toggle name="bldg" text="建築物" value="true" />
+        <ui:Toggle name="tran" text="道路" />
+        <ui:Toggle name="dem" text="地形" />
         <ui:Button name="preview" text="対象を調べる" />
       </ui:VisualElement>
       <ui:Label name="preview-result" text="範囲を決めて「対象を調べる」を押してください。" class="result" />

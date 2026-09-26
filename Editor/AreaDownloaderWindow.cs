@@ -22,41 +22,36 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         public PhotonFeature[] features;
     }
 
-    internal sealed class WheelZoomGate
+    internal static class MapZoomMath
     {
-        private const double TicksPerStep = 3;
-        private const double MinimumStepInterval = 0.2;
-        private const double IdleResetInterval = 0.3;
-        private double accumulatedTicks;
-        private double lastInputTime = double.NegativeInfinity;
-        private double lastStepTime = double.NegativeInfinity;
-
-        internal int Consume(float verticalTicks, double now, int currentZoom, int minZoom, int maxZoom)
+        internal static double ApplyWheel(float verticalTicks, double currentZoom, double minZoom,
+            double maxZoom, double sensitivity = 1d)
         {
             if (float.IsNaN(verticalTicks) || float.IsInfinity(verticalTicks) || verticalTicks == 0)
-                return 0;
-            if (now - lastInputTime > IdleResetInterval ||
-                (accumulatedTicks != 0 && Math.Sign(accumulatedTicks) != Math.Sign(verticalTicks)))
-                accumulatedTicks = 0;
-            lastInputTime = now;
-            if ((verticalTicks < 0 && currentZoom >= maxZoom) ||
-                (verticalTicks > 0 && currentZoom <= minZoom))
-            {
-                accumulatedTicks = 0;
-                return 0;
-            }
-            if (now - lastStepTime < MinimumStepInterval) return 0;
-            if (accumulatedTicks == 0 && Math.Abs(verticalTicks) >= 1)
-            {
-                lastStepTime = now;
-                return verticalTicks < 0 ? 1 : -1;
-            }
-            accumulatedTicks += Math.Max(-TicksPerStep, Math.Min(TicksPerStep, verticalTicks));
-            if (Math.Abs(accumulatedTicks) < TicksPerStep) return 0;
-            var step = accumulatedTicks < 0 ? 1 : -1;
-            accumulatedTicks = 0;
-            lastStepTime = now;
-            return step;
+                return currentZoom;
+            var ticks = Math.Max(-2d, Math.Min(2d, verticalTicks));
+            return Math.Max(minZoom, Math.Min(maxZoom, currentZoom - ticks * 0.125d * sensitivity));
+        }
+
+        internal static double WorldScale(double zoom) => 256d * Math.Pow(2d, zoom);
+
+        internal static int TileZoom(double zoom) => (int)Math.Floor(zoom);
+
+        internal static double TileSize(double zoom) => 256d * Math.Pow(2d, zoom - TileZoom(zoom));
+
+        internal static (double x, double y) ToWorld(double latitude, double longitude, double zoom)
+        {
+            var scale = WorldScale(zoom);
+            var sin = Math.Sin(Math.Max(-85.0511, Math.Min(85.0511, latitude)) * Math.PI / 180);
+            return ((longitude + 180) / 360 * scale,
+                (0.5 - Math.Log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale);
+        }
+
+        internal static (double latitude, double longitude) FromWorld(double x, double y, double zoom)
+        {
+            var scale = WorldScale(zoom);
+            return (Math.Atan(Math.Sinh(Math.PI * (1 - 2 * y / scale))) * 180 / Math.PI,
+                x / scale * 360 - 180);
         }
     }
 
@@ -74,13 +69,19 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         private readonly Dictionary<string, TileRequest> tileRequests = new Dictionary<string, TileRequest>();
         private readonly SemaphoreSlim tileDownloadSlots = new SemaphoreSlim(4);
         private readonly Dictionary<string, PhotonFeature[]> searchCache = new Dictionary<string, PhotonFeature[]>();
-        private readonly WheelZoomGate wheelZoom = new WheelZoomGate();
         private FontAsset japaneseFont;
         private CancellationTokenSource operation;
         private GeoBounds bounds;
         private double centerLatitude = 35.6586;
         private double centerLongitude = 139.7454;
-        private int zoom = 15;
+        private double zoom = 15;
+        private int zoomSensitivityPercent = 100;
+        private double targetZoom = 15;
+        private double lastZoomFrameTime;
+        private bool zoomAnimating;
+        private Vector2 zoomAnchorPoint;
+        private double zoomAnchorLatitude;
+        private double zoomAnchorLongitude;
         private Vector2 pointerStart;
         private double pointerCenterLatitude;
         private double pointerCenterLongitude;
@@ -89,6 +90,10 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         private HashSet<string> neededTileKeys = new HashSet<string>();
         private int previewGeneration;
         private string placeName = "東京タワー";
+        [SerializeField] private bool includeBuildings = true;
+        [SerializeField] private bool includeRoads;
+        [SerializeField] private bool includeTerrain;
+        [SerializeField] private bool hasSelectionState;
         private PackManifest desired;
         private PackManifest downloaded;
         private string downloadedDataRoot;
@@ -98,6 +103,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         private VisualElement boundsOverlay;
         private VisualElement candidates;
         private Label previewResult;
+        private Label meshSummary;
+        private Label mapLegend;
         private Label progressLabel;
         private Label handoffResult;
         private VisualElement handoffCities;
@@ -121,12 +128,16 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         private void OnEnable()
         {
             bounds = GeoBounds.FromCenter(centerLatitude, centerLongitude);
+            targetZoom = zoom;
+            zoomAnimating = false;
             EditorApplication.update += DrainProgress;
+            EditorApplication.update += TickZoom;
         }
 
         private void OnDisable()
         {
             EditorApplication.update -= DrainProgress;
+            EditorApplication.update -= TickZoom;
             operation?.Cancel();
             operation?.Dispose();
             foreach (var request in tileRequests.Values) request.Cancellation.Cancel();
@@ -139,6 +150,12 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
 
         public void CreateGUI()
         {
+            if (!hasSelectionState)
+            {
+                previewGeneration++;
+                desired = null;
+                hasSelectionState = true;
+            }
             rootVisualElement.Clear();
             var layout = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(PackagePath + "AreaWindow.uxml");
             if (layout == null)
@@ -164,6 +181,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             boundsOverlay = Q<VisualElement>("bounds-overlay");
             candidates = Q<VisualElement>("candidates");
             previewResult = Q<Label>("preview-result");
+            meshSummary = Q<Label>("mesh-summary");
+            mapLegend = Q<Label>("map-legend");
             progressLabel = Q<Label>("progress");
             handoffResult = Q<Label>("handoff-result");
             handoffCities = Q<VisualElement>("handoff-cities");
@@ -175,19 +194,46 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             Q<TextField>("save-root").value = EditorPrefs.GetString(Prefs + "save", PackDownloader.DefaultDataRoot);
             Q<FloatField>("download-limit").value = EditorPrefs.GetFloat(Prefs + "downloadLimit", 10);
             Q<FloatField>("expanded-limit").value = EditorPrefs.GetFloat(Prefs + "expandedLimit", 30);
+            zoomSensitivityPercent = Mathf.Clamp(EditorPrefs.GetInt(Prefs + "zoomSensitivity", 100), 25, 300);
+            var sensitivity = Q<SliderInt>("zoom-sensitivity");
+            sensitivity.lowValue = 25;
+            sensitivity.highValue = 300;
+            sensitivity.SetValueWithoutNotify(zoomSensitivityPercent);
+            Q<Label>("zoom-sensitivity-value").text = zoomSensitivityPercent + "%";
+            sensitivity.RegisterValueChangedCallback(e =>
+            {
+                zoomSensitivityPercent = e.newValue;
+                Q<Label>("zoom-sensitivity-value").text = zoomSensitivityPercent + "%";
+                EditorPrefs.SetInt(Prefs + "zoomSensitivity", zoomSensitivityPercent);
+            });
             Q<Button>("search-button").clicked += Search;
             Q<Button>("preview").clicked += Preview;
             Q<Button>("apply-bounds").clicked += ApplyBounds;
             Q<Button>("download").clicked += Download;
             Q<Button>("cancel").clicked += () => operation?.Cancel();
             searchField.RegisterCallback<KeyDownEvent>(e => { if (e.keyCode == KeyCode.Return) Search(); });
-            map.RegisterCallback<GeometryChangedEvent>(_ => RefreshMap());
+            map.RegisterCallback<GeometryChangedEvent>(_ =>
+            {
+                StopZoomAnimation();
+                RefreshMap();
+            });
             map.RegisterCallback<PointerDownEvent>(OnPointerDown);
             map.RegisterCallback<PointerMoveEvent>(OnPointerMove);
             map.RegisterCallback<PointerUpEvent>(OnPointerUp);
             map.RegisterCallback<WheelEvent>(OnWheel);
             foreach (var name in new[] { "bldg", "tran", "dem" })
-                Q<Toggle>(name).RegisterValueChangedCallback(_ => InvalidatePreview());
+            {
+                var toggle = Q<Toggle>(name);
+                toggle.SetValueWithoutNotify(name == "bldg" ? includeBuildings :
+                    name == "tran" ? includeRoads : includeTerrain);
+                toggle.RegisterValueChangedCallback(e =>
+                {
+                    if (name == "bldg") includeBuildings = e.newValue;
+                    else if (name == "tran") includeRoads = e.newValue;
+                    else includeTerrain = e.newValue;
+                    InvalidatePreview();
+                });
+            }
             foreach (var name in new[] { "photon-url", "api-url", "tiles-url", "save-root" })
             {
                 var field = Q<TextField>(name);
@@ -199,6 +245,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             }
             WriteBounds();
             RefreshMap();
+            if (desired != null) ShowPreviewResult(desired);
         }
 
         private T Q<T>(string name) where T : VisualElement => rootVisualElement.Q<T>(name);
@@ -245,6 +292,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                         .Where(part => !string.IsNullOrWhiteSpace(part)));
                     var button = new Button(() =>
                     {
+                        StopZoomAnimation();
                         placeName = name;
                         centerLongitude = item.geometry.coordinates[0];
                         centerLatitude = item.geometry.coordinates[1];
@@ -252,6 +300,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                         WriteBounds();
                         InvalidatePreview();
                         RefreshMap();
+                        Preview();
                     }) { text = name + "　" + location + "　[" + (p?.osm_value ?? "施設") + "]" };
                     candidates.Add(button);
                 }
@@ -267,6 +316,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         {
             try
             {
+                StopZoomAnimation();
                 bounds = new GeoBounds(Q<DoubleField>("west").value, Q<DoubleField>("south").value,
                     Q<DoubleField>("east").value, Q<DoubleField>("north").value);
                 centerLatitude = (bounds.South + bounds.North) / 2;
@@ -294,6 +344,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             handoffCities?.Clear();
             if (handoffResult != null) handoffResult.text = "対象が変わりました。取得後にフォルダを表示します。";
             previewResult.text = "対象を調べ直してください。";
+            meshSummary.text = "範囲または種類を変更しました。取得区画を調べ直してください。";
             RefreshOverlay();
         }
 
@@ -302,8 +353,16 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             var generation = ++previewGeneration;
             var requestedBounds = bounds;
             var types = new[] { "bldg", "tran", "dem" }.Where(type => Q<Toggle>(type).value).ToArray();
-            if (types.Length == 0) { previewResult.text = "建築物・道路・地形から選んでください。"; return; }
+            desired = null;
+            RefreshOverlay();
+            if (types.Length == 0)
+            {
+                previewResult.text = "建築物・道路・地形から選んでください。";
+                meshSummary.text = "取得するデータを選んでください。";
+                return;
+            }
             previewResult.text = "カタログを確認中…";
+            meshSummary.text = "取得区画とファイル数を照会中…";
             try
             {
                 var cities = await PlateauApi.SearchCityGmlAsync(requestedBounds.West, requestedBounds.South,
@@ -317,19 +376,13 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 {
                     desired = null;
                     previewResult.text = "この範囲に選択した種類のCityGMLはありません。";
+                    meshSummary.text = "この範囲の取得対象はありません。";
                     RefreshOverlay();
                     return;
                 }
                 desired = PackDownloader.CreateManifest(placeName, requestedBounds.West, requestedBounds.South,
                     requestedBounds.East, requestedBounds.North, selected, ApiBase);
-                var descriptions = selected.GroupBy(item => item.city.cityCode)
-                    .Select(group => group.First().city.cityName + " " + group.First().city.year +
-                        " / 仕様" + group.First().city.spec).ToArray();
-                var lod = selected.Max(item => item.gml.maxLod);
-                previewResult.text = string.Join("、", descriptions) + "\n" +
-                    selected.Length + "ファイル / カタログ上の最大LOD " + lod +
-                    "\nGML: " + FormatBytes(desired.gmlBytes) + "、付属データを含む取得量: 不明" +
-                    "\n選択範囲と交差するファイル全体を取得します。";
+                ShowPreviewResult(desired);
                 RefreshOverlay();
             }
             catch (Exception error)
@@ -337,7 +390,35 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 if (generation != previewGeneration) return;
                 desired = null;
                 previewResult.text = "カタログ取得に失敗しました: " + error.Message;
+                meshSummary.text = "取得区画を確認できませんでした。";
+                RefreshOverlay();
             }
+        }
+
+        private void ShowPreviewResult(PackManifest manifest)
+        {
+            var entries = manifest.selectedGmls;
+            var descriptions = entries.GroupBy(item => item.cityCode)
+                .Select(group => group.First().cityName + " " + group.First().year +
+                    " / 仕様" + group.First().spec).ToArray();
+            var lod = entries.Max(item => item.maxLod);
+            meshSummary.text = BuildMeshSummary(entries);
+            previewResult.text = string.Join("、", descriptions) + "\n" +
+                entries.Length + "ファイル / カタログ上の最大LOD " + lod +
+                "\nGML: " + FormatBytes(manifest.gmlBytes) + "、付属データを含む取得量: 不明" +
+                "\n選択範囲と交差するファイル全体を取得します。";
+        }
+
+        private static string BuildMeshSummary(SelectedGml[] entries)
+        {
+            var names = new Dictionary<string, string> { { "bldg", "建築物" }, { "tran", "道路" }, { "dem", "地形" } };
+            var parts = entries.GroupBy(entry => entry.type)
+                .Select(group => (name: names.TryGetValue(group.Key, out var label) ? label : group.Key,
+                    cells: group.Select(entry => JapanMeshCode.GetCatalogBounds(entry.code, entry.url)).Distinct().Count(),
+                    files: group.Select(entry => entry.url).Distinct(StringComparer.Ordinal).Count()))
+                .Select(part => part.name + " " + part.cells + "区画 / " + part.files + "ファイル");
+            return "取得前の確認: " + string.Join("　|　", parts) +
+                "。青い指定範囲と交差する区画のファイル全体を取得します。";
         }
 
         private static string SearchCacheKey(string endpoint, string query)
@@ -369,7 +450,6 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 };
                 var completed = await PackDownloader.DownloadAsync(requested, dataRoot, limits,
                     step => progressQueue.Enqueue(step), operation.Token);
-                while (progressQueue.TryDequeue(out _)) { }
                 if (generation != previewGeneration || desired != requested)
                 {
                     progressLabel.text = "旧条件の取得が完了しました。現在の範囲は調べ直してください。";
@@ -383,7 +463,12 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             }
             catch (OperationCanceledException) { progressLabel.text = "取得を中断しました。再度「取得する」で確認・再開できます。"; }
             catch (Exception error) { progressLabel.text = "取得失敗: " + error.Message; }
-            finally { operation?.Dispose(); operation = null; }
+            finally
+            {
+                while (progressQueue.TryDequeue(out _)) { }
+                operation?.Dispose();
+                operation = null;
+            }
         }
 
         private void ShowHandoffCities()
@@ -422,10 +507,42 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         {
             if (progressLabel == null) return;
             while (progressQueue.TryDequeue(out var step))
-                progressLabel.text = step.Stage == "preparing"
-                    ? "Packを準備中: " + step.Bytes + "%"
-                    : step.Stage + ": " + FormatBytes(step.Bytes) +
-                      (step.TotalBytes > 0 ? " / " + FormatBytes(step.TotalBytes) : "");
+            {
+                var bytes = FormatBytes(step.Bytes) +
+                    (step.TotalBytes > 0 ? " / " + FormatBytes(step.TotalBytes) : "");
+                var files = step.TotalFiles > 0
+                    ? "、ファイル " + step.FilesCompleted + " / " + step.TotalFiles : "";
+                switch (step.Stage)
+                {
+                    case "preparing":
+                        progressLabel.text = "取得用Packを準備中: " + step.Bytes + "%";
+                        break;
+                    case "downloading":
+                        progressLabel.text = "ZIPを取得中: " + bytes;
+                        break;
+                    case "extracting":
+                        progressLabel.text = "ZIPを展開・ファイルを記録中: " + bytes + files;
+                        break;
+                    case "validating-references":
+                        progressLabel.text = "展開済みCityGMLの参照先を確認中: GML " +
+                            step.FilesCompleted + " / " + step.TotalFiles +
+                            "、XML走査 " + step.XmlNodesScanned + "、参照 " + step.ReferencesChecked +
+                            (string.IsNullOrEmpty(step.CurrentFile) ? "" : "\n確認中: " + Path.GetFileName(step.CurrentFile));
+                        break;
+                    case "verifying-files":
+                        progressLabel.text = "保存済みファイルのサイズとSHA-256を照合中: " + bytes + files;
+                        break;
+                    case "finalizing":
+                        progressLabel.text = "確認済みデータを保存し、取得記録を確定中…";
+                        break;
+                    case "cached":
+                        progressLabel.text = "保存済みデータの検証が完了しました。";
+                        break;
+                    default:
+                        progressLabel.text = step.Stage;
+                        break;
+                }
+            }
         }
 
         private static string FormatBytes(long value) => value < 0 ? "不明" :
@@ -435,6 +552,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         private void OnPointerDown(PointerDownEvent e)
         {
             if (e.button != 0) return;
+            StopZoomAnimation();
             pointerActive = true;
             selecting = e.shiftKey;
             pointerStart = map.WorldToLocal(e.position);
@@ -489,34 +607,56 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         {
             if (pointerActive) { e.StopPropagation(); return; }
             if (Mathf.Abs(e.delta.y) <= Mathf.Abs(e.delta.x)) return;
-            var step = wheelZoom.Consume(e.delta.y / WheelEvent.scrollDeltaPerTick,
-                EditorApplication.timeSinceStartup, zoom, 5, 18);
-            if (step == 0) { e.StopPropagation(); return; }
+            var next = MapZoomMath.ApplyWheel(e.delta.y / WheelEvent.scrollDeltaPerTick,
+                targetZoom, 5, 18, zoomSensitivityPercent / 100d);
+            next = Math.Max(zoom - 1d, Math.Min(zoom + 1d, next));
+            if (Math.Abs(next - targetZoom) < 0.000001d) { e.StopPropagation(); return; }
             var point = map.WorldToLocal(e.mousePosition);
             var anchor = ScreenToGeo(point);
-            zoom += step;
-            var center = ToWorld(anchor.latitude, anchor.longitude);
-            var adjusted = FromWorld(center.x - point.x + map.contentRect.width / 2,
-                center.y - point.y + map.contentRect.height / 2);
+            zoomAnchorPoint = point;
+            zoomAnchorLatitude = anchor.latitude;
+            zoomAnchorLongitude = anchor.longitude;
+            targetZoom = next;
+            if (!zoomAnimating) lastZoomFrameTime = EditorApplication.timeSinceStartup;
+            zoomAnimating = true;
+            e.StopPropagation();
+        }
+
+        private void TickZoom()
+        {
+            if (!zoomAnimating || map == null || map.contentRect.width <= 0) return;
+            var now = EditorApplication.timeSinceStartup;
+            var elapsed = Math.Max(0d, Math.Min(0.05d, now - lastZoomFrameTime));
+            lastZoomFrameTime = now;
+            var next = zoom + (targetZoom - zoom) * (1d - Math.Exp(-elapsed / 0.065d));
+            if (Math.Abs(targetZoom - next) < 0.001d)
+            {
+                next = targetZoom;
+                zoomAnimating = false;
+            }
+            zoom = next;
+            var anchor = ToWorld(zoomAnchorLatitude, zoomAnchorLongitude);
+            var adjusted = FromWorld(anchor.x - zoomAnchorPoint.x + map.contentRect.width / 2,
+                anchor.y - zoomAnchorPoint.y + map.contentRect.height / 2);
             centerLatitude = adjusted.latitude;
             centerLongitude = adjusted.longitude;
             RefreshMap();
-            e.StopPropagation();
+        }
+
+        private void StopZoomAnimation()
+        {
+            zoomAnimating = false;
+            targetZoom = zoom;
         }
 
         private (double x, double y) ToWorld(double latitude, double longitude)
         {
-            var scale = 256d * (1 << zoom);
-            var sin = Math.Sin(Math.Max(-85.0511, Math.Min(85.0511, latitude)) * Math.PI / 180);
-            return ((longitude + 180) / 360 * scale,
-                (0.5 - Math.Log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale);
+            return MapZoomMath.ToWorld(latitude, longitude, zoom);
         }
 
         private (double latitude, double longitude) FromWorld(double x, double y)
         {
-            var scale = 256d * (1 << zoom);
-            return (Math.Atan(Math.Sinh(Math.PI * (1 - 2 * y / scale))) * 180 / Math.PI,
-                x / scale * 360 - 180);
+            return MapZoomMath.FromWorld(x, y, zoom);
         }
 
         private (double latitude, double longitude) ScreenToGeo(Vector2 point)
@@ -541,25 +681,33 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             var needed = new HashSet<string>();
             var missing = new HashSet<string>();
             var center = ToWorld(centerLatitude, centerLongitude);
-            int firstX = (int)Math.Floor((center.x - map.contentRect.width / 2) / 256);
-            int lastX = (int)Math.Floor((center.x + map.contentRect.width / 2) / 256);
-            int firstY = (int)Math.Floor((center.y - map.contentRect.height / 2) / 256);
-            int lastY = (int)Math.Floor((center.y + map.contentRect.height / 2) / 256);
+            var tileZoom = MapZoomMath.TileZoom(zoom);
+            var tileSize = MapZoomMath.TileSize(zoom);
+            var tileCount = 1 << tileZoom;
+            int firstX = (int)Math.Floor((center.x - map.contentRect.width / 2) / tileSize);
+            int lastX = (int)Math.Floor((center.x + map.contentRect.width / 2) / tileSize);
+            int firstY = (int)Math.Floor((center.y - map.contentRect.height / 2) / tileSize);
+            int lastY = (int)Math.Floor((center.y + map.contentRect.height / 2) / tileSize);
             for (var x = firstX; x <= lastX; x++)
             for (var y = firstY; y <= lastY; y++)
             {
-                var tileX = ((x % (1 << zoom)) + (1 << zoom)) % (1 << zoom);
-                var key = zoom + "/" + tileX + "/" + y;
+                if (y < 0 || y >= tileCount) continue;
+                var tileX = ((x % tileCount) + tileCount) % tileCount;
+                var key = tileZoom + "/" + tileX + "/" + y;
                 needed.Add(key);
                 var visual = new VisualElement { pickingMode = PickingMode.Ignore };
                 visual.style.position = Position.Absolute;
-                visual.style.left = (float)(x * 256 - center.x + map.contentRect.width / 2);
-                visual.style.top = (float)(y * 256 - center.y + map.contentRect.height / 2);
-                visual.style.width = 256;
-                visual.style.height = 256;
+                visual.style.left = (float)(x * tileSize - center.x + map.contentRect.width / 2);
+                visual.style.top = (float)(y * tileSize - center.y + map.contentRect.height / 2);
+                visual.style.width = (float)tileSize;
+                visual.style.height = (float)tileSize;
                 tiles.Add(visual);
                 if (tileTextures.TryGetValue(key, out var cached)) visual.style.backgroundImage = new StyleBackground(cached);
-                else if (y >= 0 && y < (1 << zoom)) missing.Add(key);
+                else
+                {
+                    ShowFallbackTile(visual, tileZoom, tileX, y, tileSize);
+                    missing.Add(key);
+                }
             }
             foreach (var stale in tileRequests.Keys.Where(key => !needed.Contains(key)).ToArray())
             {
@@ -569,6 +717,52 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             neededTileKeys = needed;
             foreach (var key in missing) EnsureTileRequest(key);
             RefreshOverlay();
+        }
+
+        private void ShowFallbackTile(VisualElement visual, int tileZoom, int tileX, int tileY, double tileSize)
+        {
+            for (var depth = 1; tileZoom - depth >= 5; depth++)
+            {
+                var factor = 1 << depth;
+                var key = (tileZoom - depth) + "/" + (tileX / factor) + "/" + (tileY / factor);
+                if (!tileTextures.TryGetValue(key, out var parent)) continue;
+                visual.style.overflow = Overflow.Hidden;
+                var image = new VisualElement { pickingMode = PickingMode.Ignore };
+                image.style.position = Position.Absolute;
+                image.style.left = (float)(-(tileX % factor) * tileSize);
+                image.style.top = (float)(-(tileY % factor) * tileSize);
+                image.style.width = (float)(tileSize * factor);
+                image.style.height = (float)(tileSize * factor);
+                image.style.backgroundImage = new StyleBackground(parent);
+                visual.Add(image);
+                return;
+            }
+
+            var descendants = new List<(int zoom, int x, int y, Texture2D texture)>();
+            foreach (var entry in tileTextures)
+            {
+                var parts = entry.Key.Split('/');
+                var childZoom = int.Parse(parts[0], CultureInfo.InvariantCulture);
+                if (childZoom <= tileZoom) continue;
+                var factor = 1 << (childZoom - tileZoom);
+                var childX = int.Parse(parts[1], CultureInfo.InvariantCulture);
+                var childY = int.Parse(parts[2], CultureInfo.InvariantCulture);
+                if (childX / factor == tileX && childY / factor == tileY)
+                    descendants.Add((childZoom, childX, childY, entry.Value));
+            }
+            foreach (var child in descendants.OrderBy(item => item.zoom))
+            {
+                var factor = 1 << (child.zoom - tileZoom);
+                var childSize = tileSize / factor;
+                var image = new VisualElement { pickingMode = PickingMode.Ignore };
+                image.style.position = Position.Absolute;
+                image.style.left = (float)((child.x % factor) * childSize);
+                image.style.top = (float)((child.y % factor) * childSize);
+                image.style.width = (float)childSize;
+                image.style.height = (float)childSize;
+                image.style.backgroundImage = new StyleBackground(child.texture);
+                visual.Add(image);
+            }
         }
 
         private void EnsureTileRequest(string key)
@@ -614,10 +808,42 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             boundsOverlay.Clear();
             if (desired != null)
             {
-                foreach (var entry in desired.selectedGmls.GroupBy(gml => gml.url).Select(group => group.First()).Take(100))
-                    DrawGeoRect(meshOverlay, JapanMeshCode.GetCatalogBounds(entry.code, entry.url),
-                        new Color(1f, 0.58f, 0.12f, 0.16f), new Color(1f, 0.58f, 0.12f, 0.8f));
+                meshSummary.text = BuildMeshSummary(desired.selectedGmls);
+                var coverage = desired.selectedGmls
+                    .GroupBy(entry => JapanMeshCode.GetCatalogBounds(entry.code, entry.url))
+                    .Select(group => (Bounds: group.Key, Detail: group.Max(entry => entry.code?.Length ?? 0)))
+                    .ToArray();
+                var finest = coverage.Max(item => item.Detail);
+                var visible = coverage.OrderByDescending(item => item.Detail).Take(100)
+                    .OrderBy(item => item.Detail).ThenByDescending(item => item.Bounds.North)
+                    .ThenBy(item => item.Bounds.West).ToArray();
+                var number = 0;
+                foreach (var item in visible)
+                {
+                    var detailed = item.Detail == finest;
+                    if (detailed)
+                    {
+                        DrawGeoRect(meshOverlay, item.Bounds, Color.clear, Color.white, 5);
+                        DrawGeoRect(meshOverlay, item.Bounds, Color.clear, new Color(0.43f, 0.08f, 0.7f, 1f), 3);
+                        var topLeft = GeoToScreen(item.Bounds.North, item.Bounds.West);
+                        var badge = new Label((++number).ToString(CultureInfo.InvariantCulture))
+                        {
+                            pickingMode = PickingMode.Ignore
+                        };
+                        badge.AddToClassList("mesh-badge");
+                        badge.style.left = topLeft.x + 4;
+                        badge.style.top = topLeft.y + 4;
+                        meshOverlay.Add(badge);
+                    }
+                    else
+                    {
+                        DrawGeoRect(meshOverlay, item.Bounds, Color.clear, new Color(0.75f, 0.65f, 0.85f, 0.9f));
+                    }
+                }
+                mapLegend.text = "青: 指定範囲　紫の番号付き枠: 詳細区画　薄紫枠: 広域区画" +
+                    (coverage.Length > visible.Length ? "（" + (coverage.Length - visible.Length) + "区画は地図上で省略）" : "");
             }
+            else mapLegend.text = "青: 指定範囲　紫: 取得対象の区画（照会後に表示）";
             DrawGeoRect(boundsOverlay, bounds, new Color(0.1f, 0.55f, 1f, 0.12f),
                 new Color(0.1f, 0.55f, 1f, 1f));
         }
@@ -629,10 +855,11 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 new Color(0.1f, 0.55f, 1f, 1f));
         }
 
-        private void DrawGeoRect(VisualElement parent, GeoBounds geo, Color fill, Color stroke) =>
-            DrawScreenRect(parent, GeoToScreen(geo.North, geo.West), GeoToScreen(geo.South, geo.East), fill, stroke);
+        private void DrawGeoRect(VisualElement parent, GeoBounds geo, Color fill, Color stroke, float width = 2) =>
+            DrawScreenRect(parent, GeoToScreen(geo.North, geo.West), GeoToScreen(geo.South, geo.East), fill, stroke, width);
 
-        private static void DrawScreenRect(VisualElement parent, Vector2 a, Vector2 b, Color fill, Color stroke)
+        private static void DrawScreenRect(VisualElement parent, Vector2 a, Vector2 b, Color fill, Color stroke,
+            float width = 2)
         {
             var rect = new VisualElement { pickingMode = PickingMode.Ignore };
             rect.style.position = Position.Absolute;
@@ -641,8 +868,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             rect.style.width = Mathf.Abs(a.x - b.x);
             rect.style.height = Mathf.Abs(a.y - b.y);
             rect.style.backgroundColor = fill;
-            rect.style.borderTopWidth = rect.style.borderBottomWidth = 2;
-            rect.style.borderLeftWidth = rect.style.borderRightWidth = 2;
+            rect.style.borderTopWidth = rect.style.borderBottomWidth = width;
+            rect.style.borderLeftWidth = rect.style.borderRightWidth = width;
             rect.style.borderTopColor = rect.style.borderBottomColor = stroke;
             rect.style.borderLeftColor = rect.style.borderRightColor = stroke;
             parent.Add(rect);

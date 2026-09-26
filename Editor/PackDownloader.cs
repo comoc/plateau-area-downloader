@@ -68,6 +68,11 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         public string Stage;
         public long Bytes;
         public long TotalBytes;
+        public int FilesCompleted;
+        public int TotalFiles;
+        public long XmlNodesScanned;
+        public long ReferencesChecked;
+        public string CurrentFile;
     }
 
     internal static class PackDownloader
@@ -154,12 +159,13 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 {
                     var valid = await Task.Run(() =>
                     {
-                        if (!VerifySavedFiles(datasetPath, manifest.files, token)) return false;
-                        ValidateReferences(datasetPath, manifest.selectedGmls, token);
+                        if (!VerifySavedFiles(datasetPath, manifest.files, token, progress)) return false;
+                        ValidateReferences(datasetPath, manifest.selectedGmls, token, progress);
                         return true;
                     }, token);
                     if (valid)
                     {
+                        progress?.Invoke(new PackProgress { Stage = "finalizing", CurrentFile = "Saving manifest" });
                         SaveManifest(jobPath, manifest);
                         progress?.Invoke(new PackProgress { Stage = "cached", Bytes = manifest.zipBytes, TotalBytes = manifest.zipBytes });
                         return manifest;
@@ -232,13 +238,21 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 var files = await Task.Run(() =>
                 {
                     var extracted = ExtractSafe(zipPath, stagingPath, limits.MaxExpandedBytes, progress, token);
-                    ValidateReferences(stagingPath, manifest.selectedGmls, token);
+                    ValidateReferences(stagingPath, manifest.selectedGmls, token, progress);
                     return extracted;
                 }, token);
                 manifest.files = files;
                 manifest.expandedBytes = files.Sum(file => file.size);
-                if (Directory.Exists(datasetPath)) Directory.Delete(datasetPath, true);
-                Directory.Move(stagingPath, datasetPath);
+                progress?.Invoke(new PackProgress
+                {
+                    Stage = "finalizing",
+                    CurrentFile = "Replacing dataset and saving manifest"
+                });
+                await Task.Run(() =>
+                {
+                    if (Directory.Exists(datasetPath)) Directory.Delete(datasetPath, true);
+                    Directory.Move(stagingPath, datasetPath);
+                }, token);
                 manifest.status = "complete";
                 manifest.diagnostic = "";
                 SaveManifest(jobPath, manifest);
@@ -334,6 +348,11 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             var result = new List<SavedFile>(entries.Length);
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             long expanded = 0;
+            long lastReportedExpanded = 0;
+            progress?.Invoke(new PackProgress
+            {
+                Stage = "extracting", Bytes = 0, TotalBytes = declared, TotalFiles = entries.Length
+            });
             foreach (var entry in entries)
             {
                 token.ThrowIfCancellationRequested();
@@ -362,6 +381,16 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                     if (expanded > limit) throw new IOException("Pack exceeds expanded size limit.");
                     output.Write(buffer, 0, read);
                     sha.TransformBlock(buffer, 0, read, buffer, 0);
+                    if (expanded - lastReportedExpanded >= 16L * 1024 * 1024)
+                    {
+                        progress?.Invoke(new PackProgress
+                        {
+                            Stage = "extracting", Bytes = expanded, TotalBytes = declared,
+                            FilesCompleted = result.Count, TotalFiles = entries.Length,
+                            CurrentFile = relative
+                        });
+                        lastReportedExpanded = expanded;
+                    }
                 }
                 sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
                 result.Add(new SavedFile
@@ -370,23 +399,49 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                     size = size,
                     sha256 = BitConverter.ToString(sha.Hash).Replace("-", "").ToLowerInvariant()
                 });
-                progress?.Invoke(new PackProgress { Stage = "extracting", Bytes = expanded, TotalBytes = declared });
+                progress?.Invoke(new PackProgress
+                {
+                    Stage = "extracting", Bytes = expanded, TotalBytes = declared,
+                    FilesCompleted = result.Count, TotalFiles = entries.Length, CurrentFile = relative
+                });
+                lastReportedExpanded = expanded;
             }
             return result.ToArray();
         }
 
-        internal static void ValidateReferences(string dataRoot, SelectedGml[] selected, CancellationToken token)
+        internal static void ValidateReferences(string dataRoot, SelectedGml[] selected, CancellationToken token,
+            Action<PackProgress> progress = null)
         {
             var root = Path.GetFullPath(dataRoot) + Path.DirectorySeparatorChar;
             var missing = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var gml in selected)
+            long nodesScanned = 0;
+            long referencesChecked = 0;
+            progress?.Invoke(new PackProgress
+            {
+                Stage = "validating-references", TotalFiles = selected.Length
+            });
+            for (var index = 0; index < selected.Length; index++)
             {
                 token.ThrowIfCancellationRequested();
+                var gml = selected[index];
                 var name = Path.GetFileName(new Uri(gml.url).AbsolutePath);
                 var path = Path.Combine(dataRoot, gml.cityRoot, "udx", gml.type, name);
+                var relativePath = Path.Combine(gml.cityRoot, "udx", gml.type, name);
+                progress?.Invoke(new PackProgress
+                {
+                    Stage = "validating-references", FilesCompleted = index,
+                    TotalFiles = selected.Length, XmlNodesScanned = nodesScanned,
+                    ReferencesChecked = referencesChecked, CurrentFile = relativePath
+                });
                 if (!File.Exists(path))
                 {
                     missing.Add(path);
+                    progress?.Invoke(new PackProgress
+                    {
+                        Stage = "validating-references", FilesCompleted = index + 1,
+                        TotalFiles = selected.Length, XmlNodesScanned = nodesScanned,
+                        ReferencesChecked = referencesChecked, CurrentFile = relativePath
+                    });
                     continue;
                 }
                 var basePath = Path.GetDirectoryName(path) ?? dataRoot;
@@ -395,6 +450,16 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 while (!reader.EOF)
                 {
                     token.ThrowIfCancellationRequested();
+                    nodesScanned++;
+                    if (nodesScanned % 50000 == 0)
+                    {
+                        progress?.Invoke(new PackProgress
+                        {
+                            Stage = "validating-references", FilesCompleted = index,
+                            TotalFiles = selected.Length, XmlNodesScanned = nodesScanned,
+                            ReferencesChecked = referencesChecked, CurrentFile = relativePath
+                        });
+                    }
                     if (reader.NodeType != XmlNodeType.Element)
                     {
                         reader.Read();
@@ -404,16 +469,26 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                     {
                         while (reader.MoveToNextAttribute())
                             if (reader.LocalName == "codeSpace" || reader.LocalName == "href")
+                            {
                                 CheckReference(reader.Value, basePath, root, missing);
+                                referencesChecked++;
+                            }
                         reader.MoveToElement();
                     }
                     if (reader.LocalName == "imageURI" && !reader.IsEmptyElement)
                     {
                         CheckReference(reader.ReadElementContentAsString(), basePath, root, missing);
+                        referencesChecked++;
                         continue;
                     }
                     reader.Read();
                 }
+                progress?.Invoke(new PackProgress
+                {
+                    Stage = "validating-references", FilesCompleted = index + 1,
+                    TotalFiles = selected.Length, XmlNodesScanned = nodesScanned,
+                    ReferencesChecked = referencesChecked, CurrentFile = relativePath
+                });
             }
             if (missing.Count > 0)
                 throw new IOException("Missing local references (" + missing.Count + "): " +
@@ -433,28 +508,51 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         }
 
         internal static bool VerifySavedFiles(string root, SavedFile[] files,
-            CancellationToken token = default)
+            CancellationToken token = default, Action<PackProgress> progress = null)
         {
             if (files == null || files.Length == 0) return false;
             var rootFull = Path.GetFullPath(root) + Path.DirectorySeparatorChar;
             var buffer = new byte[1024 * 1024];
-            foreach (var entry in files)
+            var totalBytes = files.Sum(entry => entry.size);
+            long verifiedBytes = 0;
+            progress?.Invoke(new PackProgress
+            {
+                Stage = "verifying-files", TotalBytes = totalBytes, TotalFiles = files.Length
+            });
+            for (var index = 0; index < files.Length; index++)
             {
                 token.ThrowIfCancellationRequested();
+                var entry = files[index];
                 var path = Path.GetFullPath(Path.Combine(root, entry.path));
                 if (!path.StartsWith(rootFull, StringComparison.Ordinal) || !File.Exists(path) ||
                     new FileInfo(path).Length != entry.size) return false;
                 using var sha = SHA256.Create();
                 using var stream = File.OpenRead(path);
                 int read;
+                var lastReportedBytes = verifiedBytes;
                 while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
                 {
                     token.ThrowIfCancellationRequested();
                     sha.TransformBlock(buffer, 0, read, buffer, 0);
+                    verifiedBytes += read;
+                    if (verifiedBytes - lastReportedBytes >= 16L * 1024 * 1024)
+                    {
+                        progress?.Invoke(new PackProgress
+                        {
+                            Stage = "verifying-files", Bytes = verifiedBytes, TotalBytes = totalBytes,
+                            FilesCompleted = index, TotalFiles = files.Length, CurrentFile = entry.path
+                        });
+                        lastReportedBytes = verifiedBytes;
+                    }
                 }
                 sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
                 var hash = BitConverter.ToString(sha.Hash).Replace("-", "").ToLowerInvariant();
                 if (!string.Equals(hash, entry.sha256, StringComparison.OrdinalIgnoreCase)) return false;
+                progress?.Invoke(new PackProgress
+                {
+                    Stage = "verifying-files", Bytes = verifiedBytes, TotalBytes = totalBytes,
+                    FilesCompleted = index + 1, TotalFiles = files.Length, CurrentFile = entry.path
+                });
             }
             return true;
         }

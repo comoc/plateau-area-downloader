@@ -94,52 +94,79 @@ namespace Zabaglione.PlateauAreaDownloader.Editor.Tests
         }
 
         [Test]
-        public void WheelZoom_AccumulatesSmallEventsWithoutZoomingForEveryEvent()
+        public void WheelZoom_UsesFractionalStepsForSmallEvents()
         {
-            var gate = new WheelZoomGate();
-            for (var i = 0; i < 5; i++)
-                Assert.That(gate.Consume(-0.5f, i * 0.01, 15, 5, 18), Is.Zero);
-            Assert.That(gate.Consume(-0.5f, 0.05, 15, 5, 18), Is.EqualTo(1));
-            for (var i = 0; i < 16; i++)
-                Assert.That(gate.Consume(-0.5f, 0.06 + i * 0.01, 16, 5, 18), Is.Zero);
+            Assert.That(MapZoomMath.ApplyWheel(-0.5f, 15, 5, 18), Is.EqualTo(15.0625));
+            Assert.That(MapZoomMath.ApplyWheel(-1f, 15.0625, 5, 18), Is.EqualTo(15.1875));
         }
 
         [Test]
-        public void WheelZoom_LimitsOneLargeEventAndDiscardsRemainder()
+        public void WheelZoom_LimitsOneLargeEvent()
         {
-            var gate = new WheelZoomGate();
-            Assert.That(gate.Consume(100, 0, 15, 5, 18), Is.EqualTo(-1));
-            Assert.That(gate.Consume(0, 0.5, 14, 5, 18), Is.Zero);
-            Assert.That(gate.Consume(0.5f, 0.51, 14, 5, 18), Is.Zero);
+            Assert.That(MapZoomMath.ApplyWheel(100, 15, 5, 18), Is.EqualTo(14.75));
+            Assert.That(MapZoomMath.ApplyWheel(-100, 15, 5, 18), Is.EqualTo(15.25));
         }
 
         [Test]
-        public void WheelZoom_RespondsToIndividualWheelTicksAfterIdle()
+        public void WheelZoom_RespondsToIndividualTicks()
         {
-            var gate = new WheelZoomGate();
-            Assert.That(gate.Consume(-1, 0, 15, 5, 18), Is.EqualTo(1));
-            Assert.That(gate.Consume(-1, 0.4, 16, 5, 18), Is.EqualTo(1));
-            Assert.That(gate.Consume(-1, 0.8, 17, 5, 18), Is.EqualTo(1));
+            var zoom = 15d;
+            for (var i = 0; i < 3; i++) zoom = MapZoomMath.ApplyWheel(-1, zoom, 5, 18);
+            Assert.That(zoom, Is.EqualTo(15.375));
         }
 
         [Test]
-        public void WheelZoom_ResetsOnDirectionChangeAndIdle()
+        public void WheelZoom_SensitivityScalesTheSameInput()
         {
-            var gate = new WheelZoomGate();
-            Assert.That(gate.Consume(-0.5f, 0, 15, 5, 18), Is.Zero);
-            Assert.That(gate.Consume(0.5f, 0.05, 15, 5, 18), Is.Zero);
-            Assert.That(gate.Consume(2.5f, 0.10, 15, 5, 18), Is.EqualTo(-1));
-            Assert.That(gate.Consume(-0.5f, 0.5, 14, 5, 18), Is.Zero);
-            Assert.That(gate.Consume(-0.5f, 0.9, 14, 5, 18), Is.Zero);
+            Assert.That(MapZoomMath.ApplyWheel(-1, 15, 5, 18, 0.5), Is.EqualTo(15.0625));
+            Assert.That(MapZoomMath.ApplyWheel(-1, 15, 5, 18, 2), Is.EqualTo(15.25));
+            Assert.That(MapZoomMath.ApplyWheel(100, 15, 5, 18, 3), Is.EqualTo(14.25));
         }
 
         [Test]
-        public void WheelZoom_DiscardsInputAtZoomLimits()
+        public void WheelZoom_ReversesWithoutStoredRemainder()
         {
-            var gate = new WheelZoomGate();
-            Assert.That(gate.Consume(-100, 0, 18, 5, 18), Is.Zero);
-            Assert.That(gate.Consume(-0.5f, 0.1, 17, 5, 18), Is.Zero);
-            Assert.That(gate.Consume(100, 0.5, 5, 5, 18), Is.Zero);
+            var zoom = MapZoomMath.ApplyWheel(-0.5f, 15, 5, 18);
+            Assert.That(MapZoomMath.ApplyWheel(0.5f, zoom, 5, 18), Is.EqualTo(15));
+        }
+
+        [Test]
+        public void WheelZoom_ClampsAtZoomLimitsAndIgnoresInvalidInput()
+        {
+            Assert.That(MapZoomMath.ApplyWheel(-100, 18, 5, 18), Is.EqualTo(18));
+            Assert.That(MapZoomMath.ApplyWheel(100, 5, 5, 18), Is.EqualTo(5));
+            Assert.That(MapZoomMath.ApplyWheel(float.NaN, 15, 5, 18), Is.EqualTo(15));
+        }
+
+        [Test]
+        public void FractionalZoom_PreservesTileScaleAndCoordinateRoundTrip()
+        {
+            Assert.That(MapZoomMath.TileZoom(15.5), Is.EqualTo(15));
+            Assert.That(MapZoomMath.TileSize(15.5), Is.EqualTo(256 * Math.Sqrt(2)).Within(0.00001));
+            Assert.That(MapZoomMath.WorldScale(16), Is.EqualTo(MapZoomMath.WorldScale(15) * 2));
+            var world = MapZoomMath.ToWorld(35.7100, 139.8100, 15.37);
+            var geo = MapZoomMath.FromWorld(world.x, world.y, 15.37);
+            Assert.That(geo.latitude, Is.EqualTo(35.7100).Within(0.00000001));
+            Assert.That(geo.longitude, Is.EqualTo(139.8100).Within(0.00000001));
+        }
+
+        [Test]
+        public void FractionalZoom_KeepsPointerAnchorFixed()
+        {
+            var anchor = MapZoomMath.ToWorld(35.7100, 139.8100, 15.2);
+            const double pointerX = 200;
+            const double pointerY = 120;
+            const double width = 900;
+            const double height = 430;
+            var center = MapZoomMath.FromWorld(anchor.x - pointerX + width / 2,
+                anchor.y - pointerY + height / 2, 15.2);
+            var newAnchor = MapZoomMath.ToWorld(35.7100, 139.8100, 15.8);
+            var newCenter = MapZoomMath.FromWorld(newAnchor.x - pointerX + width / 2,
+                newAnchor.y - pointerY + height / 2, 15.8);
+            var centerWorld = MapZoomMath.ToWorld(newCenter.latitude, newCenter.longitude, 15.8);
+            Assert.That(newAnchor.x - centerWorld.x + width / 2, Is.EqualTo(pointerX).Within(0.000001));
+            Assert.That(newAnchor.y - centerWorld.y + height / 2, Is.EqualTo(pointerY).Within(0.000001));
+            Assert.That(center.latitude, Is.Not.EqualTo(newCenter.latitude));
         }
     }
 }
