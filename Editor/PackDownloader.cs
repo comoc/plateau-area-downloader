@@ -77,6 +77,9 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
 
     internal static class PackDownloader
     {
+        private const string LockFileName = ".plateau-area-downloader.lock";
+        private const string PreviousDatasetName = "dataset.previous";
+
         internal static string DefaultDataRoot => Path.GetFullPath(Path.Combine(Application.dataPath, "../PLATEAUData~"));
 
         internal static string CityRootName(CatalogCity city)
@@ -142,19 +145,47 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             if (limits.MaxDownloadBytes <= 0 || limits.MaxExpandedBytes <= 0)
                 throw new ArgumentException("Download limits must be positive.");
             EnsureSafeDataRoot(dataRoot);
+            if (!IsJobKey(desired.key)) throw new ArgumentException("Invalid download job key.");
+            using var dataRootLock = AcquireDataRootLock(dataRoot);
             EnsureDefaultDataIgnored(dataRoot);
             var jobPath = JobPath(dataRoot, desired);
+            RejectReparsePointsOnPath(jobPath);
+            if (Directory.Exists(jobPath) && !File.Exists(Path.Combine(jobPath, "manifest.json")) &&
+                Directory.EnumerateFileSystemEntries(jobPath).Any())
+                throw new IOException("Existing download job has no manifest; its contents were preserved.");
             Directory.CreateDirectory(jobPath);
+            RejectReparsePointsOnPath(jobPath);
+            RejectReparsePointsOnPath(Path.Combine(jobPath, "manifest.json"));
             var existing = LoadManifest(jobPath);
-            var manifest = existing != null && existing.key == desired.key ? existing : desired;
+            if (File.Exists(Path.Combine(jobPath, "manifest.json")) && existing == null)
+                throw new IOException("Download job manifest is unreadable; its contents were preserved.");
+            if (existing != null && existing.key != desired.key)
+                throw new IOException("Download job manifest key does not match its folder.");
+            var manifest = existing ?? JsonUtility.FromJson<PackManifest>(JsonUtility.ToJson(desired));
+            if (existing == null)
+            {
+                manifest.packId = null;
+                manifest.status = "new";
+                manifest.files = null;
+            }
             manifest.placeName = desired.placeName;
             manifest.west = desired.west;
             manifest.south = desired.south;
             manifest.east = desired.east;
             manifest.north = desired.north;
             var datasetPath = Path.Combine(jobPath, "dataset");
+            var stagingPath = Path.Combine(jobPath, "staging");
+            var zipPath = Path.Combine(jobPath, "pack.zip");
+            var validatedStaging = false;
+            var recoveryComplete = false;
+            var preserveCompleteOnCancel = existing != null && existing.status == "complete";
             try
             {
+                await Task.Run(() => RecoverPreviousDataset(jobPath, manifest, token), token);
+                recoveryComplete = true;
+                if (existing != null && !await Task.Run(() =>
+                        CleanupUnusedFiles(jobPath, manifest, false, progress)))
+                    throw new IOException("Unsafe or inaccessible temporary files were preserved.");
                 if (manifest.status == "complete")
                 {
                     var valid = await Task.Run(() =>
@@ -167,9 +198,11 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                     {
                         progress?.Invoke(new PackProgress { Stage = "finalizing", CurrentFile = "Saving manifest" });
                         SaveManifest(jobPath, manifest);
+                        await DeletePreviousDatasetAsync(jobPath, manifest, progress);
                         progress?.Invoke(new PackProgress { Stage = "cached", Bytes = manifest.zipBytes, TotalBytes = manifest.zipBytes });
                         return manifest;
                     }
+                    preserveCompleteOnCancel = false;
                 }
                 var urls = manifest.selectedGmls.Select(entry => entry.url)
                     .Concat(manifest.metadataUrls ?? Array.Empty<string>()).Distinct(StringComparer.Ordinal).ToArray();
@@ -180,7 +213,6 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                     SaveManifest(jobPath, manifest);
                 }
 
-                var zipPath = Path.Combine(jobPath, "pack.zip");
                 for (var downloadAttempt = 0; downloadAttempt < 2; downloadAttempt++)
                 {
                     var recreated = false;
@@ -232,8 +264,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 manifest.status = "downloaded";
                 SaveManifest(jobPath, manifest);
 
-                var stagingPath = Path.Combine(jobPath, "staging");
-                if (Directory.Exists(stagingPath)) Directory.Delete(stagingPath, true);
+                RejectReparsePointsOnPath(stagingPath);
+                if (Directory.Exists(stagingPath)) throw new IOException("Uncleaned staging folder was preserved.");
                 Directory.CreateDirectory(stagingPath);
                 var files = await Task.Run(() =>
                 {
@@ -243,6 +275,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 }, token);
                 manifest.files = files;
                 manifest.expandedBytes = files.Sum(file => file.size);
+                validatedStaging = true;
                 progress?.Invoke(new PackProgress
                 {
                     Stage = "finalizing",
@@ -250,26 +283,63 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 });
                 await Task.Run(() =>
                 {
-                    if (Directory.Exists(datasetPath)) Directory.Delete(datasetPath, true);
-                    Directory.Move(stagingPath, datasetPath);
+                    ReplaceDataset(jobPath);
                 }, token);
                 manifest.status = "complete";
                 manifest.diagnostic = "";
-                SaveManifest(jobPath, manifest);
+                try { SaveManifest(jobPath, manifest); }
+                catch (Exception saveError)
+                {
+                    try { RestorePreviousDatasetAfterSaveFailure(jobPath); }
+                    catch (Exception restoreError)
+                    {
+                        throw new IOException("Manifest save and dataset rollback failed; data was preserved.",
+                            new AggregateException(saveError, restoreError));
+                    }
+                    throw;
+                }
+                await DeletePreviousDatasetAsync(jobPath, manifest, progress);
                 return manifest;
-            }
-            catch (OperationCanceledException)
-            {
-                manifest.status = "interrupted";
-                SaveManifest(jobPath, manifest);
-                throw;
             }
             catch (Exception error)
             {
-                manifest.status = "failed";
-                manifest.diagnostic = error.ToString();
-                SaveManifest(jobPath, manifest);
+                if (!(error is OperationCanceledException && preserveCompleteOnCancel))
+                {
+                    manifest.status = error is OperationCanceledException ? "interrupted" : "failed";
+                    manifest.diagnostic = error.ToString();
+                    TrySaveManifest(jobPath, manifest, progress);
+                }
                 throw;
+            }
+            finally
+            {
+                var previous = Path.Combine(jobPath, PreviousDatasetName);
+                var preserveStaging = validatedStaging &&
+                    (!Directory.Exists(datasetPath) || Directory.Exists(previous));
+                if (!recoveryComplete)
+                {
+                    try
+                    {
+                        if (!await Task.Run(() => CanDiscardStagingAfterUnfinishedRecovery(jobPath)))
+                            preserveStaging = true;
+                    }
+                    catch (Exception safetyError)
+                    {
+                        preserveStaging = true;
+                        ReportCleanupWarning(jobPath, manifest,
+                            "Staging was preserved because its safety check failed: " + safetyError.Message,
+                            progress);
+                    }
+                }
+                try
+                {
+                    await Task.Run(() => CleanupUnusedFiles(jobPath, manifest, preserveStaging, progress));
+                }
+                catch (Exception cleanupError)
+                {
+                    ReportCleanupWarning(jobPath, manifest,
+                        "Temporary cleanup failed: " + cleanupError.Message, progress);
+                }
             }
         }
 
@@ -283,6 +353,263 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             if (full.Equals(assets, comparison) ||
                 full.StartsWith(assets + Path.DirectorySeparatorChar, comparison))
                 throw new ArgumentException("CityGML data root must be outside Assets.");
+        }
+
+        private static bool IsJobKey(string key) => key != null && key.Length == 24 &&
+            key.All(character => character >= '0' && character <= '9' ||
+                                 character >= 'a' && character <= 'f');
+
+        private static FileStream AcquireDataRootLock(string dataRoot)
+        {
+            RejectReparsePointsOnPath(dataRoot);
+            Directory.CreateDirectory(dataRoot);
+            RejectReparsePointsOnPath(dataRoot);
+            var lockPath = Path.Combine(dataRoot, LockFileName);
+            RejectReparsePointsOnPath(lockPath);
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException error)
+            {
+                throw new IOException("Data root is busy or its lock file is unavailable.", error);
+            }
+        }
+
+        private static void RejectReparsePointsOnPath(string path)
+        {
+            var full = Path.GetFullPath(path);
+            var current = Path.GetPathRoot(full);
+            var parts = full.Substring(current.Length).Split(new[]
+            {
+                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar
+            }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var part in parts)
+            {
+                current = Path.Combine(current, part);
+                try
+                {
+                    if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                        throw new IOException("Symbolic links and junctions are not allowed in download paths: " + current);
+                }
+                catch (FileNotFoundException) { }
+                catch (DirectoryNotFoundException) { }
+            }
+        }
+
+        private static void RejectReparsePointsInTree(string directory, CancellationToken token = default)
+        {
+            token.ThrowIfCancellationRequested();
+            RejectReparsePointsOnPath(directory);
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+            {
+                token.ThrowIfCancellationRequested();
+                RejectReparsePointsOnPath(entry);
+                if (Directory.Exists(entry)) RejectReparsePointsInTree(entry, token);
+            }
+        }
+
+        private static void RecoverPreviousDataset(string jobPath, PackManifest manifest,
+            CancellationToken token)
+        {
+            var dataset = Path.Combine(jobPath, "dataset");
+            RejectReparsePointsOnPath(dataset);
+            if (Directory.Exists(dataset)) RejectReparsePointsInTree(dataset, token);
+            var previous = Path.Combine(jobPath, PreviousDatasetName);
+            RejectReparsePointsOnPath(previous);
+            if (!Directory.Exists(previous)) return;
+            if (Directory.Exists(dataset) && manifest.status == "complete" &&
+                VerifySavedFiles(dataset, manifest.files, token)) return;
+            RejectReparsePointsInTree(previous, token);
+            if (File.Exists(dataset))
+                throw new IOException("Dataset recovery is blocked by a file; previous dataset was preserved.");
+            if (!Directory.Exists(dataset))
+            {
+                Directory.Move(previous, dataset);
+                return;
+            }
+            throw new IOException("Dataset replacement needs manual recovery; both dataset folders were preserved.");
+        }
+
+        private static bool CanDiscardStagingAfterUnfinishedRecovery(string jobPath)
+        {
+            var previous = Path.Combine(jobPath, PreviousDatasetName);
+            RejectReparsePointsOnPath(previous);
+            if (File.Exists(previous) || Directory.Exists(previous)) return false;
+            var dataset = Path.Combine(jobPath, "dataset");
+            RejectReparsePointsOnPath(dataset);
+            if (File.Exists(dataset)) return false;
+            if (Directory.Exists(dataset)) RejectReparsePointsInTree(dataset);
+            var staging = Path.Combine(jobPath, "staging");
+            RejectReparsePointsOnPath(staging);
+            if (File.Exists(staging)) return false;
+            if (Directory.Exists(staging)) RejectReparsePointsInTree(staging);
+            return true;
+        }
+
+        internal static void ReplaceDataset(string jobPath, Action beforeStagingMove = null)
+        {
+            var staging = Path.Combine(jobPath, "staging");
+            var dataset = Path.Combine(jobPath, "dataset");
+            var previous = Path.Combine(jobPath, PreviousDatasetName);
+            RejectReparsePointsInTree(staging);
+            RejectReparsePointsOnPath(dataset);
+            RejectReparsePointsOnPath(previous);
+            if (File.Exists(dataset) || File.Exists(previous) || Directory.Exists(previous))
+                throw new IOException("Dataset replacement path is occupied; staged data was preserved.");
+            var movedPrevious = false;
+            if (Directory.Exists(dataset))
+            {
+                RejectReparsePointsInTree(dataset);
+                Directory.Move(dataset, previous);
+                movedPrevious = true;
+            }
+            try
+            {
+                beforeStagingMove?.Invoke();
+                Directory.Move(staging, dataset);
+            }
+            catch (Exception moveError)
+            {
+                if (movedPrevious)
+                {
+                    try { Directory.Move(previous, dataset); }
+                    catch (Exception restoreError)
+                    {
+                        throw new IOException("Dataset replacement and rollback failed; both folders were preserved.",
+                            new AggregateException(moveError, restoreError));
+                    }
+                }
+                throw;
+            }
+        }
+
+        private static void RestorePreviousDatasetAfterSaveFailure(string jobPath)
+        {
+            var previous = Path.Combine(jobPath, PreviousDatasetName);
+            RejectReparsePointsOnPath(previous);
+            if (!Directory.Exists(previous)) return;
+            var dataset = Path.Combine(jobPath, "dataset");
+            var staging = Path.Combine(jobPath, "staging");
+            RejectReparsePointsInTree(previous);
+            RejectReparsePointsInTree(dataset);
+            RejectReparsePointsOnPath(staging);
+            if (File.Exists(staging) || Directory.Exists(staging))
+                throw new IOException("Staging is occupied; both datasets were preserved.");
+            Directory.Move(dataset, staging);
+            try { Directory.Move(previous, dataset); }
+            catch
+            {
+                Directory.Move(staging, dataset);
+                throw;
+            }
+        }
+
+        private static void DeletePreviousDataset(string jobPath, PackManifest manifest,
+            Action<PackProgress> progress)
+        {
+            var previous = Path.Combine(jobPath, PreviousDatasetName);
+            try
+            {
+                RejectReparsePointsOnPath(previous);
+                if (!Directory.Exists(previous)) return;
+                RejectReparsePointsInTree(previous);
+                Directory.Delete(previous, true);
+            }
+            catch (Exception error)
+            {
+                ReportCleanupWarning(jobPath, manifest, "Could not remove previous dataset: " + error.Message,
+                    progress);
+            }
+        }
+
+        private static async Task DeletePreviousDatasetAsync(string jobPath, PackManifest manifest,
+            Action<PackProgress> progress)
+        {
+            try { await Task.Run(() => DeletePreviousDataset(jobPath, manifest, progress)); }
+            catch (Exception error)
+            {
+                ReportCleanupWarning(jobPath, manifest, "Could not remove previous dataset: " + error.Message,
+                    progress);
+            }
+        }
+
+        private static bool CleanupUnusedFiles(string jobPath, PackManifest manifest,
+            bool preserveStaging, Action<PackProgress> progress)
+        {
+            try
+            {
+                RejectReparsePointsOnPath(jobPath);
+                RejectReparsePointsOnPath(Path.Combine(jobPath, "manifest.json"));
+                var saved = LoadManifest(jobPath);
+                if (!IsJobKey(Path.GetFileName(jobPath)) || saved == null ||
+                    saved.key != Path.GetFileName(jobPath) || saved.key != manifest.key)
+                    throw new IOException("Temporary files have no matching owned manifest.");
+            }
+            catch (Exception error)
+            {
+                ReportCleanupWarning(jobPath, manifest, "Temporary files were preserved: " + error.Message,
+                    progress, false);
+                return false;
+            }
+            var cleaned = true;
+            foreach (var name in new[] { "pack.zip.part", "staging", "pack.zip" })
+            {
+                if (name == "staging" && preserveStaging) continue;
+                var path = Path.Combine(jobPath, name);
+                try
+                {
+                    RejectReparsePointsOnPath(path);
+                    if (name == "staging")
+                    {
+                        if (File.Exists(path)) throw new IOException("Expected a directory, found a file.");
+                        if (Directory.Exists(path))
+                        {
+                            RejectReparsePointsInTree(path);
+                            Directory.Delete(path, true);
+                        }
+                    }
+                    else
+                    {
+                        if (Directory.Exists(path)) throw new IOException("Expected a file, found a directory.");
+                        if (File.Exists(path)) File.Delete(path);
+                    }
+                }
+                catch (Exception error)
+                {
+                    cleaned = false;
+                    ReportCleanupWarning(jobPath, manifest,
+                        "Temporary file was preserved (" + name + "): " + error.Message, progress);
+                }
+            }
+            return cleaned;
+        }
+
+        private static void TrySaveManifest(string jobPath, PackManifest manifest,
+            Action<PackProgress> progress)
+        {
+            try { SaveManifest(jobPath, manifest); }
+            catch (Exception error)
+            {
+                var message = "Could not save download status: " + error.Message;
+                try { Debug.LogWarning(message); }
+                catch (Exception) { }
+                try { progress?.Invoke(new PackProgress { Stage = "cleanup-warning", CurrentFile = message }); }
+                catch (Exception) { }
+            }
+        }
+
+        private static void ReportCleanupWarning(string jobPath, PackManifest manifest, string message,
+            Action<PackProgress> progress, bool persist = true)
+        {
+            try { Debug.LogWarning(message); }
+            catch (Exception) { }
+            try { progress?.Invoke(new PackProgress { Stage = "cleanup-warning", CurrentFile = message }); }
+            catch (Exception) { }
+            if (!persist) return;
+            manifest.diagnostic = string.IsNullOrEmpty(manifest.diagnostic)
+                ? message : manifest.diagnostic + "\n" + message;
+            TrySaveManifest(jobPath, manifest, progress);
         }
 
         private static void EnsureDefaultDataIgnored(string dataRoot)
@@ -304,6 +631,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             Action<PackProgress> progress, CancellationToken token)
         {
             var partial = zipPath + ".part";
+            RejectReparsePointsOnPath(zipPath);
+            RejectReparsePointsOnPath(partial);
             if (File.Exists(partial)) File.Delete(partial);
             var url = manifest.apiBase.TrimEnd('/') + "/citygml/pack/" +
                 Uri.EscapeDataString(manifest.packId) + ".zip";
@@ -333,6 +662,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 throw new IOException("Pack download failed: HTTP " + request.responseCode + " " + request.error);
             var size = new FileInfo(partial).Length;
             if (size > limit) throw new IOException("Pack exceeds download limit.");
+            RejectReparsePointsOnPath(zipPath);
+            RejectReparsePointsOnPath(partial);
             if (File.Exists(zipPath)) File.Delete(zipPath);
             File.Move(partial, zipPath);
         }
@@ -366,7 +697,9 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 var destination = Path.GetFullPath(Path.Combine(root, relative));
                 if (!destination.StartsWith(rootFull, StringComparison.Ordinal))
                     throw new IOException("ZIP entry escapes destination: " + relative);
+                RejectReparsePointsOnPath(destination);
                 Directory.CreateDirectory(Path.GetDirectoryName(destination) ?? root);
+                RejectReparsePointsOnPath(destination);
                 using var input = entry.Open();
                 using var output = File.Create(destination);
                 using var sha = SHA256.Create();
@@ -561,6 +894,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         {
             var path = Path.Combine(jobPath, "manifest.json");
             var pending = path + ".tmp";
+            RejectReparsePointsOnPath(path);
+            RejectReparsePointsOnPath(pending);
             File.WriteAllText(pending, JsonUtility.ToJson(manifest, true));
             if (File.Exists(path)) File.Replace(pending, path, null);
             else File.Move(pending, path);
