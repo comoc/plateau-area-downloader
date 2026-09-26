@@ -87,22 +87,6 @@ namespace Zabaglione.PlateauAreaDownloader.Editor.Tests
         }
 
         [Test]
-        public void ImportMeshCodes_LimitsSecondLevelDemToSelectedQuarterAndBounds()
-        {
-            var manifest = new PackManifest
-            {
-                west = 141.35, south = 43.068, east = 141.351, north = 43.069,
-                selectedGmls = new[] { new SelectedGml
-                {
-                    cityRoot = "sapporo", code = "644142", type = "dem",
-                    url = "https://example.test/udx/dem/644142_dem_6697_55_op.gml"
-                } }
-            };
-            CollectionAssert.AreEqual(new[] { "64414288" },
-                PackDownloader.ImportMeshCodes(manifest, "sapporo"));
-        }
-
-        [Test]
         public void DownloadAsync_RejectsAssetsDestinationBeforeNetworkAccess()
         {
             var manifest = new PackManifest

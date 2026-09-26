@@ -90,24 +90,6 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
     }
 
     [Serializable]
-    internal sealed class CrsResponse
-    {
-        public CrsData data;
-    }
-
-    [Serializable]
-    internal sealed class CrsData
-    {
-        public CrsArea area;
-    }
-
-    [Serializable]
-    internal sealed class CrsArea
-    {
-        public string planarCrsEpsgCode;
-    }
-
-    [Serializable]
     internal sealed class PackCreated
     {
         public string id;
@@ -164,22 +146,6 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                       "?types=" + string.Join(",", selectedTypes);
             var json = await GetStringAsync(url, token);
             return JsonUtility.FromJson<CatalogResponse>(json)?.cities ?? Array.Empty<CatalogCity>();
-        }
-
-        internal static async Task<int> GetCoordinateZoneAsync(string cityCode, string apiBase, CancellationToken token)
-        {
-            if (string.IsNullOrWhiteSpace(cityCode)) return 0;
-            var graph = "{ area(code:\"" + cityCode + "\") { ... on City { planarCrsEpsgCode } } }";
-            using var request = new HttpRequestMessage(HttpMethod.Post, apiBase.TrimEnd('/') + "/datacatalog/graphql");
-            request.Content = new StringContent("{\"query\":\"" + graph.Replace("\"", "\\\"") + "\"}",
-                Encoding.UTF8, "application/json");
-            using var response = await SendWithThrottleAsync(request, token);
-            var body = await response.Content.ReadAsStringAsync();
-            if (!response.IsSuccessStatusCode) throw new HttpRequestException("Coordinate catalog failed: " + (int)response.StatusCode);
-            var raw = JsonUtility.FromJson<CrsResponse>(body)?.data?.area?.planarCrsEpsgCode;
-            if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var epsg)) return 0;
-            var zone = epsg - 6668;
-            return zone >= 1 && zone <= 19 ? zone : 0;
         }
 
         internal static async Task<string> CreatePackAsync(string[] urls, string apiBase, CancellationToken token)

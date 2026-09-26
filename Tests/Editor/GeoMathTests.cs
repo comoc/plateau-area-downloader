@@ -92,5 +92,54 @@ namespace Zabaglione.PlateauAreaDownloader.Editor.Tests
             Assert.Throws<ArgumentOutOfRangeException>(() => new GeoBounds(-181.0, 35.0, 139.0, 36.0));
             Assert.Throws<ArgumentOutOfRangeException>(() => GeoBounds.FromCenter(35.0, 139.0, 0.0));
         }
+
+        [Test]
+        public void WheelZoom_AccumulatesSmallEventsWithoutZoomingForEveryEvent()
+        {
+            var gate = new WheelZoomGate();
+            for (var i = 0; i < 5; i++)
+                Assert.That(gate.Consume(-0.5f, i * 0.01, 15, 5, 18), Is.Zero);
+            Assert.That(gate.Consume(-0.5f, 0.05, 15, 5, 18), Is.EqualTo(1));
+            for (var i = 0; i < 16; i++)
+                Assert.That(gate.Consume(-0.5f, 0.06 + i * 0.01, 16, 5, 18), Is.Zero);
+        }
+
+        [Test]
+        public void WheelZoom_LimitsOneLargeEventAndDiscardsRemainder()
+        {
+            var gate = new WheelZoomGate();
+            Assert.That(gate.Consume(100, 0, 15, 5, 18), Is.EqualTo(-1));
+            Assert.That(gate.Consume(0, 0.5, 14, 5, 18), Is.Zero);
+            Assert.That(gate.Consume(0.5f, 0.51, 14, 5, 18), Is.Zero);
+        }
+
+        [Test]
+        public void WheelZoom_RespondsToIndividualWheelTicksAfterIdle()
+        {
+            var gate = new WheelZoomGate();
+            Assert.That(gate.Consume(-1, 0, 15, 5, 18), Is.EqualTo(1));
+            Assert.That(gate.Consume(-1, 0.4, 16, 5, 18), Is.EqualTo(1));
+            Assert.That(gate.Consume(-1, 0.8, 17, 5, 18), Is.EqualTo(1));
+        }
+
+        [Test]
+        public void WheelZoom_ResetsOnDirectionChangeAndIdle()
+        {
+            var gate = new WheelZoomGate();
+            Assert.That(gate.Consume(-0.5f, 0, 15, 5, 18), Is.Zero);
+            Assert.That(gate.Consume(0.5f, 0.05, 15, 5, 18), Is.Zero);
+            Assert.That(gate.Consume(2.5f, 0.10, 15, 5, 18), Is.EqualTo(-1));
+            Assert.That(gate.Consume(-0.5f, 0.5, 14, 5, 18), Is.Zero);
+            Assert.That(gate.Consume(-0.5f, 0.9, 14, 5, 18), Is.Zero);
+        }
+
+        [Test]
+        public void WheelZoom_DiscardsInputAtZoomLimits()
+        {
+            var gate = new WheelZoomGate();
+            Assert.That(gate.Consume(-100, 0, 18, 5, 18), Is.Zero);
+            Assert.That(gate.Consume(-0.5f, 0.1, 17, 5, 18), Is.Zero);
+            Assert.That(gate.Consume(100, 0.5, 5, 5, 18), Is.Zero);
+        }
     }
 }

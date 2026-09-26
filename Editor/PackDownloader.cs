@@ -48,7 +48,6 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         public double south;
         public double east;
         public double north;
-        public int coordinateZone;
         public SelectedGml[] selectedGmls;
         public string[] metadataUrls;
         public long gmlBytes;
@@ -83,7 +82,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         }
 
         internal static PackManifest CreateManifest(string placeName, double west, double south,
-            double east, double north, int coordinateZone,
+            double east, double north,
             IEnumerable<(CatalogCity city, string type, CatalogGml gml)> selected,
             string apiBase)
         {
@@ -115,7 +114,6 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 apiBase = apiBase,
                 placeName = placeName,
                 west = west, south = south, east = east, north = north,
-                coordinateZone = coordinateZone,
                 selectedGmls = entries,
                 metadataUrls = metadata,
                 gmlBytes = entries.Any(entry => entry.fileSize <= 0) ? -1 : entries.Sum(entry => entry.fileSize)
@@ -124,16 +122,6 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
 
         internal static string JobPath(string dataRoot, PackManifest manifest) =>
             Path.Combine(dataRoot, manifest.key);
-
-        internal static string[] ImportMeshCodes(PackManifest manifest, string cityRoot = null)
-        {
-            var area = new GeoBounds(manifest.west, manifest.south, manifest.east, manifest.north);
-            var entries = manifest.selectedGmls.Where(entry => cityRoot == null || entry.cityRoot == cityRoot).ToArray();
-            return JapanMeshCode.EnumerateIntersecting(area, false)
-                .Where(code => entries.Any(entry => JapanMeshCode.GetCatalogBounds(entry.code, entry.url)
-                    .Intersects(JapanMeshCode.GetBounds(code), false)))
-                .ToArray();
-        }
 
         internal static PackManifest LoadManifest(string jobPath)
         {
@@ -159,7 +147,6 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             manifest.south = desired.south;
             manifest.east = desired.east;
             manifest.north = desired.north;
-            manifest.coordinateZone = desired.coordinateZone;
             var datasetPath = Path.Combine(jobPath, "dataset");
             try
             {

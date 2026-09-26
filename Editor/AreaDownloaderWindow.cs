@@ -8,10 +8,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using PLATEAU.CityInfo;
-using PLATEAU.PolygonMesh;
 using UnityEditor;
-using UnityEditor.UIElements;
 using UnityEngine;
 using UnityEngine.TextCore.Text;
 using UnityEngine.UIElements;
@@ -23,6 +20,44 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
     {
         public long savedUtcTicks;
         public PhotonFeature[] features;
+    }
+
+    internal sealed class WheelZoomGate
+    {
+        private const double TicksPerStep = 3;
+        private const double MinimumStepInterval = 0.2;
+        private const double IdleResetInterval = 0.3;
+        private double accumulatedTicks;
+        private double lastInputTime = double.NegativeInfinity;
+        private double lastStepTime = double.NegativeInfinity;
+
+        internal int Consume(float verticalTicks, double now, int currentZoom, int minZoom, int maxZoom)
+        {
+            if (float.IsNaN(verticalTicks) || float.IsInfinity(verticalTicks) || verticalTicks == 0)
+                return 0;
+            if (now - lastInputTime > IdleResetInterval ||
+                (accumulatedTicks != 0 && Math.Sign(accumulatedTicks) != Math.Sign(verticalTicks)))
+                accumulatedTicks = 0;
+            lastInputTime = now;
+            if ((verticalTicks < 0 && currentZoom >= maxZoom) ||
+                (verticalTicks > 0 && currentZoom <= minZoom))
+            {
+                accumulatedTicks = 0;
+                return 0;
+            }
+            if (now - lastStepTime < MinimumStepInterval) return 0;
+            if (accumulatedTicks == 0 && Math.Abs(verticalTicks) >= 1)
+            {
+                lastStepTime = now;
+                return verticalTicks < 0 ? 1 : -1;
+            }
+            accumulatedTicks += Math.Max(-TicksPerStep, Math.Min(TicksPerStep, verticalTicks));
+            if (Math.Abs(accumulatedTicks) < TicksPerStep) return 0;
+            var step = accumulatedTicks < 0 ? 1 : -1;
+            accumulatedTicks = 0;
+            lastStepTime = now;
+            return step;
+        }
     }
 
     internal sealed class AreaDownloaderWindow : EditorWindow
@@ -39,6 +74,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         private readonly Dictionary<string, TileRequest> tileRequests = new Dictionary<string, TileRequest>();
         private readonly SemaphoreSlim tileDownloadSlots = new SemaphoreSlim(4);
         private readonly Dictionary<string, PhotonFeature[]> searchCache = new Dictionary<string, PhotonFeature[]>();
+        private readonly WheelZoomGate wheelZoom = new WheelZoomGate();
         private FontAsset japaneseFont;
         private CancellationTokenSource operation;
         private GeoBounds bounds;
@@ -63,7 +99,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         private VisualElement candidates;
         private Label previewResult;
         private Label progressLabel;
-        private Label importResult;
+        private Label handoffResult;
+        private VisualElement handoffCities;
         private TextField searchField;
 
         [MenuItem("Tools/PLATEAU Area Downloader")]
@@ -128,7 +165,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             candidates = Q<VisualElement>("candidates");
             previewResult = Q<Label>("preview-result");
             progressLabel = Q<Label>("progress");
-            importResult = Q<Label>("import-result");
+            handoffResult = Q<Label>("handoff-result");
+            handoffCities = Q<VisualElement>("handoff-cities");
             searchField = Q<TextField>("search");
             searchField.value = placeName;
             Q<TextField>("photon-url").value = EditorPrefs.GetString(Prefs + "photon", PlateauApi.DefaultPhotonBase);
@@ -137,21 +175,11 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             Q<TextField>("save-root").value = EditorPrefs.GetString(Prefs + "save", PackDownloader.DefaultDataRoot);
             Q<FloatField>("download-limit").value = EditorPrefs.GetFloat(Prefs + "downloadLimit", 10);
             Q<FloatField>("expanded-limit").value = EditorPrefs.GetFloat(Prefs + "expandedLimit", 30);
-            Q<IntegerField>("max-lod").value = 4;
-            Q<EnumField>("granularity").Init(MeshGranularity.PerPrimaryFeatureObject);
-            var originField = Q<ObjectField>("existing-origin");
-            if (originField == null)
-            {
-                originField = new ObjectField("既存都市モデルの原点を使う") { name = "existing-origin" };
-                rootVisualElement.Add(originField);
-            }
-            originField.objectType = typeof(PLATEAUInstancedCityModel);
             Q<Button>("search-button").clicked += Search;
             Q<Button>("preview").clicked += Preview;
             Q<Button>("apply-bounds").clicked += ApplyBounds;
             Q<Button>("download").clicked += Download;
             Q<Button>("cancel").clicked += () => operation?.Cancel();
-            Q<Button>("import").clicked += Import;
             searchField.RegisterCallback<KeyDownEvent>(e => { if (e.keyCode == KeyCode.Return) Search(); });
             map.RegisterCallback<GeometryChangedEvent>(_ => RefreshMap());
             map.RegisterCallback<PointerDownEvent>(OnPointerDown);
@@ -169,12 +197,6 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                     if (name == "api-url" || name == "save-root") InvalidatePreview();
                 });
             }
-            Q<IntegerField>("zone").RegisterValueChangedCallback(_ =>
-            {
-                downloaded = null;
-                downloadedDataRoot = null;
-                importResult.text = "座標系が変わりました。「取得する」で保存条件を確認してください。";
-            });
             WriteBounds();
             RefreshMap();
         }
@@ -269,6 +291,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             desired = null;
             downloaded = null;
             downloadedDataRoot = null;
+            handoffCities?.Clear();
+            if (handoffResult != null) handoffResult.text = "対象が変わりました。取得後にフォルダを表示します。";
             previewResult.text = "対象を調べ直してください。";
             RefreshOverlay();
         }
@@ -296,29 +320,16 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                     RefreshOverlay();
                     return;
                 }
-                var zoneByCity = new List<int>();
-                foreach (var city in cities.Where(city => selected.Any(item => item.city == city)))
-                {
-                    try { zoneByCity.Add(await PlateauApi.GetCoordinateZoneAsync(city.cityCode, ApiBase, CancellationToken.None)); }
-                    catch { zoneByCity.Add(0); }
-                    if (generation != previewGeneration) return;
-                }
-                var zones = zoneByCity.Where(zone => zone > 0).Distinct().ToArray();
-                if (zones.Length == 1 && zoneByCity.All(zone => zone == zones[0]))
-                    Q<IntegerField>("zone").SetValueWithoutNotify(zones[0]);
-                else Q<IntegerField>("zone").SetValueWithoutNotify(0);
                 desired = PackDownloader.CreateManifest(placeName, requestedBounds.West, requestedBounds.South,
-                    requestedBounds.East, requestedBounds.North, Q<IntegerField>("zone").value, selected, ApiBase);
+                    requestedBounds.East, requestedBounds.North, selected, ApiBase);
                 var descriptions = selected.GroupBy(item => item.city.cityCode)
                     .Select(group => group.First().city.cityName + " " + group.First().city.year +
                         " / 仕様" + group.First().city.spec).ToArray();
                 var lod = selected.Max(item => item.gml.maxLod);
-                Q<IntegerField>("max-lod").value = lod;
                 previewResult.text = string.Join("、", descriptions) + "\n" +
-                    selected.Length + "ファイル / " + PackDownloader.ImportMeshCodes(desired).Length +
-                    "メッシュ / 最大LOD " + lod + "\nGML: " + FormatBytes(desired.gmlBytes) +
-                    "、付属データを含む取得量: 不明" +
-                    (Q<IntegerField>("zone").value == 0 ? "\n座標系を確認して系番号を選択してください。" : "");
+                    selected.Length + "ファイル / カタログ上の最大LOD " + lod +
+                    "\nGML: " + FormatBytes(desired.gmlBytes) + "、付属データを含む取得量: 不明" +
+                    "\n選択範囲と交差するファイル全体を取得します。";
                 RefreshOverlay();
             }
             catch (Exception error)
@@ -340,9 +351,6 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         {
             if (desired == null) { progressLabel.text = "先に対象を調べてください。"; return; }
             if (operation != null) { progressLabel.text = "別の処理を実行中です。"; return; }
-            var zone = Q<IntegerField>("zone").value;
-            if (zone < 1 || zone > 19) { progressLabel.text = "座標系の系番号を1～19から選んでください。"; return; }
-            desired.coordinateZone = zone;
             try
             {
                 var requested = desired;
@@ -362,8 +370,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 var completed = await PackDownloader.DownloadAsync(requested, dataRoot, limits,
                     step => progressQueue.Enqueue(step), operation.Token);
                 while (progressQueue.TryDequeue(out _)) { }
-                if (generation != previewGeneration || desired != requested ||
-                    Q<IntegerField>("zone").value != zone)
+                if (generation != previewGeneration || desired != requested)
                 {
                     progressLabel.text = "旧条件の取得が完了しました。現在の範囲は調べ直してください。";
                     return;
@@ -372,45 +379,43 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 downloadedDataRoot = dataRoot;
                 progressLabel.text = "取得完了: " + downloaded.files.Length + "ファイル / ZIP " +
                     FormatBytes(downloaded.zipBytes) + " / 展開後 " + FormatBytes(downloaded.expandedBytes);
-                importResult.text = "インポートできます。";
+                ShowHandoffCities();
             }
             catch (OperationCanceledException) { progressLabel.text = "取得を中断しました。再度「取得する」で確認・再開できます。"; }
             catch (Exception error) { progressLabel.text = "取得失敗: " + error.Message; }
             finally { operation?.Dispose(); operation = null; }
         }
 
-        private async void Import()
+        private void ShowHandoffCities()
         {
-            if (downloaded == null || downloaded.status != "complete")
-            { importResult.text = "先に取得を完了してください。"; return; }
-            if (operation != null) return;
-            operation = new CancellationTokenSource();
-            try
+            handoffCities.Clear();
+            if (downloaded == null || downloaded.status != "complete") return;
+            var datasetRoot = Path.Combine(PackDownloader.JobPath(downloadedDataRoot, downloaded), "dataset");
+            foreach (var city in downloaded.selectedGmls.GroupBy(entry => entry.cityRoot))
             {
-                importResult.text = "SDKで読み込み中…";
-                var options = new ImportOptions
-                {
-                    MinimumLod = Math.Max(0, Q<IntegerField>("min-lod").value),
-                    MaximumLod = Math.Max(0, Q<IntegerField>("max-lod").value),
-                    IncludeTexture = Q<Toggle>("texture").value,
-                    Collider = Q<Toggle>("collider").value,
-                    Attributes = Q<Toggle>("attributes").value,
-                    Granularity = (MeshGranularity)Q<EnumField>("granularity").value,
-                    ExistingOrigin = Q<ObjectField>("existing-origin").value as PLATEAUInstancedCityModel
-                };
-                var outcome = await PlateauImport.ImportAsync(downloaded, downloadedDataRoot, options, operation.Token);
-                importResult.text = outcome.Interrupted
-                    ? "読み込み中断。部分結果が残る場合があります。自動再実行はしません。"
-                    : "SDK読み込み終了: 都市 " + outcome.CityCount + " / GML " + outcome.GmlCount +
-                      " / 新規メッシュ " + outcome.MeshCount + " / エラー " + outcome.Errors.Length +
-                      (outcome.MeshCount == 0 || outcome.Errors.Length > 0 ? "。ConsoleとHierarchyを確認してください。" : "。");
+                var entry = city.First();
+                var folder = Path.GetFullPath(Path.Combine(datasetRoot, city.Key));
+                handoffCities.Add(new Label(entry.cityName + " " + entry.year + " / 仕様" + entry.spec));
+                var pathLabel = new Label(folder) { tooltip = folder };
+                pathLabel.AddToClassList("result");
+                handoffCities.Add(pathLabel);
+                handoffCities.Add(new Button(() => OpenSdkForCity(folder))
+                    { text = "パスをコピーしてSDKを開く" });
             }
-            catch (OperationCanceledException)
+            handoffResult.text = "公式SDKで都市ごとに「参照...」からフォルダを選択してください。Macの選択画面では⌘⇧Gでコピーしたパスを入力できます。";
+        }
+
+        private void OpenSdkForCity(string folder)
+        {
+            if (!Directory.Exists(Path.Combine(folder, "udx")))
             {
-                importResult.text = "読み込み開始前に中断しました。";
+                handoffResult.text = "都市フォルダが見つかりません。取得結果を確認してください: " + folder;
+                return;
             }
-            catch (Exception error) { importResult.text = "読み込み失敗。部分結果を確認してください: " + error.Message; }
-            finally { operation?.Dispose(); operation = null; }
+            EditorGUIUtility.systemCopyBuffer = folder;
+            handoffResult.text = EditorApplication.ExecuteMenuItem("PLATEAU/PLATEAU SDK")
+                ? "パスをコピーしました。公式SDKで「都市の追加 → ローカル → 入力フォルダ → 参照...」を選んでください。"
+                : "パスをコピーしました。公式SDKを「PLATEAU → PLATEAU SDK」から手動で開いてください。";
         }
 
         private void DrainProgress()
@@ -482,7 +487,19 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
 
         private void OnWheel(WheelEvent e)
         {
-            zoom = Mathf.Clamp(zoom + (e.delta.y < 0 ? 1 : -1), 5, 18);
+            if (pointerActive) { e.StopPropagation(); return; }
+            if (Mathf.Abs(e.delta.y) <= Mathf.Abs(e.delta.x)) return;
+            var step = wheelZoom.Consume(e.delta.y / WheelEvent.scrollDeltaPerTick,
+                EditorApplication.timeSinceStartup, zoom, 5, 18);
+            if (step == 0) { e.StopPropagation(); return; }
+            var point = map.WorldToLocal(e.mousePosition);
+            var anchor = ScreenToGeo(point);
+            zoom += step;
+            var center = ToWorld(anchor.latitude, anchor.longitude);
+            var adjusted = FromWorld(center.x - point.x + map.contentRect.width / 2,
+                center.y - point.y + map.contentRect.height / 2);
+            centerLatitude = adjusted.latitude;
+            centerLongitude = adjusted.longitude;
             RefreshMap();
             e.StopPropagation();
         }
@@ -600,9 +617,6 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 foreach (var entry in desired.selectedGmls.GroupBy(gml => gml.url).Select(group => group.First()).Take(100))
                     DrawGeoRect(meshOverlay, JapanMeshCode.GetCatalogBounds(entry.code, entry.url),
                         new Color(1f, 0.58f, 0.12f, 0.16f), new Color(1f, 0.58f, 0.12f, 0.8f));
-                foreach (var code in PackDownloader.ImportMeshCodes(desired).Take(100))
-                    DrawGeoRect(meshOverlay, JapanMeshCode.GetBounds(code), new Color(0.25f, 0.8f, 0.34f, 0.18f),
-                        new Color(0.25f, 0.8f, 0.34f, 0.8f));
             }
             DrawGeoRect(boundsOverlay, bounds, new Color(0.1f, 0.55f, 1f, 0.12f),
                 new Color(0.1f, 0.55f, 1f, 1f));

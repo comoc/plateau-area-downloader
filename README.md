@@ -1,10 +1,77 @@
 # PLATEAU Area Downloader
 
-施設名や座標から周辺の CityGML を探し、PLATEAU SDK for Unity に読み込むための Editor 専用 UPM パッケージです。
+施設名や地図から範囲を決め、その範囲と交差する CityGML ファイルと参照データを取得する Unity Editor 用 UPM パッケージです。取得後は都市ごとのフォルダを公式 PLATEAU SDK for Unity へ渡します。座標系、LOD、テクスチャなどの設定とインポートは公式 SDK で行います。
 
-- Unity 6000.3 以降
-- PLATEAU SDK for Unity 4.3.0
-- `Tools/PLATEAU Area Downloader` から起動
-- Photon、PLATEAU CityGML API、国土地理院の地図タイルに接続します。API キーや生成 AI は使用しません。
+## 1. できることと確認済みの結果
 
-本パッケージの自作コードは [MIT ライセンス](LICENSE)です。SDK・地図・都市モデル・検索サービスは本ライセンスの対象外です。出典と利用条件は [第三者サービスとデータ](THIRD_PARTY_NOTICES.md)を確認してください。
+東京タワー周辺で建築物・道路・地形を取得し、公式 SDK 4.3.0 のローカル入力で都市フォルダを選択できることを確認しました。Unity 6000.3.10f1 の Universal 3D（URP）プロジェクトでは、同じ取得データを公式 SDK で読み込んだシーンに建築物のテクスチャ、道路、地形が表示されました。[検証範囲と結果](Documentation~/validation-urp-2026-09-26.md)を参照してください。
+
+この確認は macOS で行いました。Windows 実機は未検証です。
+
+## 2. 必要な環境
+
+- Unity 6000.3.10f1 以降のプロジェクト。確認済みの構成は Universal 3D / URP 17.3.0 です。
+- Git クライアントと、CityGML・地図・検索サービスへ接続できる環境。
+- [PLATEAU SDK for Unity 4.3.0](https://github.com/Project-PLATEAU/PLATEAU-SDK-for-Unity/releases/tag/v4.3.0)。先に導入します。
+
+本パッケージは公式 SDK のメニューを開くために SDK 4.3.0 に依存します。公式 SDK のインポート処理そのものを本パッケージ内に複製していません。
+
+## 3. 公式 SDK を先に導入
+
+1. [公式 Release v4.3.0](https://github.com/Project-PLATEAU/PLATEAU-SDK-for-Unity/releases/tag/v4.3.0) の Assets から `.tgz` を取得します。GitHub のソース ZIP ではなく、配布用 `.tgz` を使用します。
+2. Unity の **Window → Package Management → Package Manager** を開き、左上の **＋ → Install package from tarball...** で `.tgz` を選びます。
+3. Package Manager に `PLATEAU SDK for Unity` が表示されることを確認します。
+
+公式 SDK 4.3.0 には再インポート時に `RoadNetworkEditMode` の未定義参照による UXML エラーが確認されています。詳細は [Issue #2](https://github.com/zabaglione/plateau-area-downloader/issues/2) に記録しています。
+
+## 4. 本パッケージを導入
+
+公式 SDK を入れた後、Package Manager の **＋ → Install package from git URL...** で次を指定します。
+
+```text
+https://github.com/zabaglione/plateau-area-downloader.git#v0.1.0
+```
+
+`v0.1.0` は正式公開時の導入先です。公開前の非公開検証では、このタグを導入済みとして扱わず、検証対象のコミット SHA と GitHub へのアクセス権を別途確認してください。導入後は **Tools → PLATEAU Area Downloader** から開きます。Git URL の入力方法は [Unity の手順](https://docs.unity3d.com/ja/6000.0/Manual/upm-ui-giturl.html)も参照できます。
+
+## 5. 施設を探す
+
+「施設名」に地名や施設名を入れて「検索」を押し、候補を選びます。検索候補が出なくても、地図や経緯度で範囲を指定できます。施設検索は Photon と OpenStreetMap のデータを使用します。
+
+## 6. 地図で範囲を決める
+
+地図をドラッグすると移動し、ホイール・トラックパッドの縦スクロールで拡大縮小します。Shift＋ドラッグで青い範囲を指定します。経緯度を直接入力したときは「反映」を押します。細かなスクロール入力はまとめて処理し、1イベントで複数段階は移動しません。
+
+## 7. 対象を確認して取得
+
+「建築物」「道路」「地形」を選び、「対象を調べる」を押します。橙色は取得対象ファイルの地理範囲で、表示は先頭100件までです。青い選択範囲と交差する**ファイル全体**を取得するため、青い範囲だけにデータが切り詰められるわけではありません。データの形状や配置範囲は後で公式 SDK 側でも選択します。
+
+「取得する」を押すと、既定ではプロジェクト直下の `PLATEAUData~` にジョブ別フォルダが作られます。保存先は画面の「保存先」で変更できますが、`Assets` 内は指定できません。既定の保存先を使う Git プロジェクトでは、`/PLATEAUData~/` を `.gitignore` に追加します。取得上限は ZIP の転送量が既定 **10 GiB**、展開後が既定 **30 GiB** です。上限を超えると取得を失敗として止め、完了データとしては表示しません。対象確認時の GML 容量は参照画像などを含む最終的な取得量ではありません。
+
+「中断」を押した場合や失敗した場合、ジョブの `manifest.json` と ZIP・`.part`・`staging` などの途中ファイルが残ることがあります。「取得する」を再実行すると、完了済みデータは整合性を確認して再利用し、未完了の ZIP は先頭から再取得します。通信途中のバイト単位の再開はしません。不要な途中データは、画面の保存先にある該当ジョブのフォルダを確認してから手動で削除してください。
+
+## 8. 公式 SDK に渡す
+
+取得完了後、画面下部に都市・年度ごとのフォルダが表示されます。対象都市の「パスをコピーしてSDKを開く」を押し、公式 SDK の **都市の追加 → ローカル → 入力フォルダ → 参照...** で、その都市フォルダを選びます。選ぶのは直下に `udx` がある都市フォルダです。`dataset` 全体や `udx` 自体を選ばないでください。Mac のフォルダ選択画面では `⌘⇧G` でコピーしたパスへ移動できます。複数都市があるときは都市ごとに選択します。
+
+公式 SDK の座標系、LOD、対象メッシュ、テクスチャなどを確認してから、SDK の操作でインポートしてください。本パッケージのボタンはインポートを開始しません。
+
+## 9. 結果を確認する
+
+公式 SDK の処理後、Scene View と Game View で表示を確認します。Hierarchy で都市モデル、Inspector で参照やマテリアルを確認し、Console の Error / Exception / Assert、Missing Script、欠落マテリアル、ピンク表示がないか確認してください。保存後に Unity を再起動して同じシーンを確認すると、保存漏れも検出できます。
+
+## 10. 困ったとき
+
+| 状況 | 確認すること |
+| --- | --- |
+| SDK が未導入・メニューが開かない | 公式 `.tgz` を先に導入し、`PLATEAU → PLATEAU SDK` メニューがあるか確認します。 |
+| Git URL 導入に失敗する | Git の導入、URL、非公開段階なら GitHub へのアクセス権を確認します。正式タグは公開後に使用します。 |
+| 検索や地図が出ない | 接続先、ネットワーク、Photon・地理院タイルの稼働状況を確認します。経緯度入力でも範囲を指定できます。 |
+| 対象が多すぎる・容量上限を超える | 青い範囲を小さくし、対象種類と上限を見直して「対象を調べる」から再実行します。 |
+| 中断後の取得が進まない | 保存先のジョブフォルダにある `manifest.json` の状態と空き容量を確認します。途中ファイルを残す場合があります。 |
+| 公式 SDK がフォルダを受け付けない | `dataset/<都市フォルダ>/udx` があることを確認し、`<都市フォルダ>` を「参照...」で選びます。 |
+| インポート後に表示されない | 公式 SDK の範囲・LOD・座標系・対象種類を確認し、Scene / Game View と Console を点検します。 |
+
+## 出典とライセンス
+
+本パッケージの自作コードは [MIT ライセンス](LICENSE)です。公式 SDK、地理院タイル、都市モデル、Photon、OpenStreetMap は同梱せず、各提供元の条件に従います。[第三者サービスとデータ](THIRD_PARTY_NOTICES.md)を確認してください。
