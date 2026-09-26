@@ -20,6 +20,10 @@
         <ui:SliderInt name="zoom-sensitivity" low-value="25" high-value="300" value="100" style="flex-grow: 1; flex-shrink: 1; min-width: 240px;" />
         <ui:Label name="zoom-sensitivity-value" text="100%" />
       </ui:VisualElement>
+      <ui:VisualElement class="row map-source">
+        <ui:Label text="地図: 地理院タイル（国土地理院）" />
+        <ui:Button name="map-source-link" text="地理院タイル一覧" />
+      </ui:VisualElement>
       <ui:VisualElement class="map-workspace">
         <ui:VisualElement class="map-column">
           <ui:VisualElement name="map" class="map">

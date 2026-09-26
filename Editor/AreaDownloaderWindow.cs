@@ -208,6 +208,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 Q<Label>("zoom-sensitivity-value").text = zoomSensitivityPercent + "%";
                 EditorPrefs.SetInt(Prefs + "zoomSensitivity", zoomSensitivityPercent);
             });
+            Q<Button>("map-source-link").clicked += () =>
+                Application.OpenURL("https://maps.gsi.go.jp/development/ichiran.html");
             Q<Button>("search-button").clicked += Search;
             Q<Button>("preview").clicked += Preview;
             Q<Button>("apply-bounds").clicked += ApplyBounds;
@@ -415,6 +417,13 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         private void ShowPreviewResult(PackManifest manifest)
         {
             var entries = manifest.selectedGmls;
+            if (entries == null || entries.Length == 0)
+            {
+                desired = null;
+                meshSummary.text = "この範囲の取得対象はありません。";
+                previewResult.text = "CityGMLファイルを再検索してください。";
+                return;
+            }
             var descriptions = entries.GroupBy(item => item.cityCode)
                 .Select(group => group.First().cityName + " " + group.First().year +
                     " / 仕様" + group.First().spec).ToArray();
@@ -832,7 +841,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                     .GroupBy(entry => JapanMeshCode.GetCatalogBounds(entry.code, entry.url))
                     .Select(group => (Bounds: group.Key, Detail: group.Max(entry => entry.code?.Length ?? 0)))
                     .ToArray();
-                var finest = coverage.Max(item => item.Detail);
+                var finest = coverage.Length == 0 ? 0 : coverage.Max(item => item.Detail);
                 var visible = coverage.OrderByDescending(item => item.Detail).Take(100)
                     .OrderBy(item => item.Detail).ThenByDescending(item => item.Bounds.North)
                     .ThenBy(item => item.Bounds.West).ToArray();

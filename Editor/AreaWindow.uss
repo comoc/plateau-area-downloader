@@ -13,6 +13,8 @@
 .limit { min-width: 0; width: 240px; }
 .zoom-controls { margin-top: 4px; margin-bottom: 2px; align-self: stretch; }
 .zoom-controls .unity-slider-int { flex-grow: 1; min-width: 240px; }
+.map-source { margin-top: 2px; margin-bottom: 2px; }
+.map-source #map-source-link { height: 22px; }
 .map-workspace { flex-direction: row; align-items: stretch; margin-top: 6px; }
 .map-column { flex-grow: 1; flex-shrink: 1; min-width: 0; }
 .map { height: 400px; overflow: hidden; background-color: #c1ced0; margin-bottom: 4px; }

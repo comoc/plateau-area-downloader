@@ -1,6 +1,6 @@
 # 第三者サービスとデータ
 
-本リポジトリには、PLATEAU SDK、都市モデル、Photon、OpenStreetMap のコードやデータを同梱していません。利用手順の画像・動画には、操作中に表示された地理院タイルと検索結果が含まれます。自作部分の MIT ライセンスは、これらの外部サービスとデータに適用されません。
+本リポジトリには、PLATEAU SDK、都市モデル、Photon、OpenStreetMap のコードやデータを同梱していません。利用手順の画像・動画には、操作中に表示された地理院タイルと検索結果が含まれます。画像には実画面の切り抜き、動画には待機時間のカットと出典表示の追加を行っています。自作部分の MIT ライセンスは、これらの外部サービスとデータに適用されません。
 
 | 対象 | 本ツールでの利用 | 出典・条件 |
 | --- | --- | --- |
@@ -11,3 +11,5 @@
 | OpenStreetMap | Photon の検索データの出典 | [© OpenStreetMap contributors](https://www.openstreetmap.org/copyright)。検索結果やその画像を再利用する場合も出典を維持してください。 |
 
 利用者が別の接続先へ変更した場合は、その提供者の利用条件を確認してください。取得した都市モデルや作成したスクリーンショットを公開するときは、使用した地域・年度・データセットの出典と条件を個別に確認してください。
+
+過去の Git 履歴にある `Documentation~/media/01-place-search.jpg`、`02-gml-search.jpg`、`03-download-complete.jpg`、`04-sdk-local.jpg`、`05-sdk-folder-picker.jpg`、`06-sdk-folder-specified.jpg` に写る背景地図の出典は**地理院タイル（国土地理院）**です。旧画像は Unity 実画面から切り抜き、JPEG に変換したものです。特に `01-place-search.jpg` と `02-gml-search.jpg` は画像内の出典表示が欠けているため、ここに明記します。施設検索結果の出典は **Photon / © OpenStreetMap contributors** です。旧 JPEG は現行版から削除し、マニュアルには地図内出典を確認できる PNG を掲載しています。[地理院タイル一覧](https://maps.gsi.go.jp/development/ichiran.html)と[出典の記載案内](https://www.gsi.go.jp/LAW/2930-meizi.html)も参照してください。
