@@ -22,6 +22,10 @@ Unity `6000.3.10f1` 以降を使います。確認済みの構成は Universal 3
 
 [公式 Release v4.3.0](https://github.com/Project-PLATEAU/PLATEAU-SDK-for-Unity/releases/tag/v4.3.0) から `PLATEAU-SDK-for-Unity-v4.3.0.0.tgz` を取得します。Unity の **Window → Package Management → Package Manager** を開き、左上の **＋ → Install package from tarball...** で `.tgz` を指定します。Package Manager に公式 SDK が表示されたことを確認します。
 
+![公式PLATEAU SDK 4.3.0をtarballから導入したPackage Manager](media/package-manager-sdk-install.png)
+
+[Package Manager の文字を原寸で見る](media/package-manager-sdk-install.png)
+
 本パッケージは公式 SDK に依存し、SDK のインポート処理を複製していません。Unity Package Manager がパッケージの `package.json` による Git パッケージ間依存を解決できないため、SDK を先に導入してください。
 
 ## 4. 本パッケージを導入する
@@ -33,6 +37,14 @@ https://github.com/zabaglione/plateau-area-downloader.git#v0.1.0
 ```
 
 公開前の検証で正式タグ `v0.1.0` を使わず、検証対象のコミット SHA と GitHub へのアクセス権を確認してください。導入後は **Tools → PLATEAU Area Downloader** を開きます。
+
+公式 SDK の tarball と本ツールの非公開 Git URLを別の一時プロジェクトに順番に追加した結果は[Package Manager検証記録](validation-upm-2026-09-26.md)にあります。
+
+![公開前の候補SHAから本ツールをGit URLで導入したPackage Manager](media/package-manager-git-install.png)
+
+[Package Manager の文字を原寸で見る](media/package-manager-git-install.png)
+
+画像の導入元は公開前の候補コミット `6774dee` です。上記の `v0.1.0` は正式公開後に使うタグです。
 
 ## 5. 施設を検索する
 
@@ -49,8 +61,6 @@ https://github.com/zabaglione/plateau-area-downloader.git#v0.1.0
 右側で「建築物」「道路」「地形」を選び、「CityGMLファイルを検索」を押します。範囲または種類を変えた後は再検索してください。地域メッシュはおおむね約 1 km 単位です。紫色の番号付き枠は検索で見つかった詳細区画、薄紫色の枠は広域区画です。地図上の区画表示は最大 100 件で、件数欄には検索結果全体が表示されます。
 
 ![広い範囲の検索結果。15件のCityGMLファイルが見つかった状態](media/wide-range-results.png)
-
-![経緯度を入力した状態。反映前なので右側の検索結果は入力前のまま](media/coordinates-entered.png)
 
 ![入力範囲を反映し、検索結果が消えた状態](media/range-applied-before-search.png)
 
@@ -74,8 +84,6 @@ https://github.com/zabaglione/plateau-area-downloader.git#v0.1.0
 
 完了画面は、範囲を縮めて再検索した後、港区の 5 CityGML ファイルと関連データを含む 6,907 ファイルを確認した例です。表示数値と保存先は撮影時のものです。背景地図は地理院タイル（国土地理院）です。
 
-![都市フォルダのパスをコピーした後の案内](media/sdk-path-copied.png)
-
 中断・失敗時は安全に削除できる ZIP・`.part`・`staging` を自動で整理し、再実行に使う `manifest.json` と以前の完成済み `dataset` を残します。再実行時に完成済みデータは整合性を確認して再利用します。未完了 ZIP は先頭から再取得され、通信途中からの再開はしません。強制終了後の残りファイルも同じジョブの次回実行時に整理します。削除できなかった場合は Console の警告と保存先を確認してください。`dataset` と `dataset.previous` が両方残った場合は自動復旧を停止し、誤削除を避けます。
 
 ## 8. 都市フォルダを公式 SDK に渡す
@@ -83,8 +91,6 @@ https://github.com/zabaglione/plateau-area-downloader.git#v0.1.0
 取得完了後、都市名の下にある「パスをコピーしてSDKを開く」を押します。複数都市がある場合は使う都市を選びます。公式 SDK の **インポート → 都市の追加 → ローカル → 入力フォルダ → 参照...** を開きます。
 
 Mac のフォルダ選択画面で **⌘⇧G** を押し、コピーしたパスを貼り付けて Return を押します。直下に `udx` がある都市フォルダを選び、**Choose** を押します。Windows は選択画面のアドレス欄へパスを入力する方法がありますが、Windows 実機での操作は未検証です。
-
-![選択する都市フォルダの内容。直下にudxがある](media/city-folder-contents.png)
 
 ![公式SDKのローカル入力欄に都市フォルダを指定した状態](media/sdk-local-folder-input.png)
 
@@ -109,9 +115,15 @@ PLATEAUData~/
 3. 範囲選択画面の「決定」を押して元のシーンへ戻ります。
 4. 地物別設定で種類・LOD・テクスチャなどを確認し、「モデルをインポート」を押します。処理の進捗は SDK ウィンドウを下へスクロールして確認できます。
 
-このガイドの操作動画と画像が示す SDK の GUI 操作は、都市フォルダを受け付けるところまでです。現行パッケージから取得した同じ都市フォルダの実際のインポートと再起動後の表示は、SDK の公開 API 経由で検証しました。GUI の「モデルをインポート」完了までは実操作で確認していません。結果と条件は[検証記録](validation-urp-2026-09-26.md)に記載しています。
+このガイドの操作動画と画像が示す SDK の GUI 操作は、都市フォルダを受け付けるところまでです。別の検証プロジェクトで本ツールから取得済みの都市フォルダを使い、新規 URP プロジェクトで SDK の公開 API によるインポートと再起動後の表示を検証しました。その後、新規 URP プロジェクトで改めて取得したフォルダのファイルサイズと SHA-256 が、インポートに使ったフォルダの manifest と一致することを確認しました。GUI の「モデルをインポート」完了までは実操作で確認していません。結果と条件は[検証記録](validation-upm-2026-09-26.md)に記載しています。
 
 処理後、Scene View と Game View で表示を確認します。Hierarchy で都市モデル、Inspector で参照やマテリアルを見て、Console の Error / Exception / Assert、Missing Script、欠落マテリアル、ピンク表示を点検します。シーンを保存して Unity を再起動した後に再確認すると、保存した結果も確かめられます。
+
+![保存した都市モデルをUnity Scene Viewで確認した状態](media/scene-view-city-model.png)
+
+![同じ都市モデルをUnity Game Viewで確認した状態](media/game-view-city-model.png)
+
+両画像の出典は[3D都市モデル（Project PLATEAU）港区（2025年度）](https://www.geospatial.jp/ckan/dataset/plateau-13103-minato-ku-2025)です。データセットの選択可能なライセンスから CC BY 4.0 を選び、CityGML を Unity で可視化して撮影しました。元データは本パッケージに含めていません。
 
 ## 10. 困ったときと既知の問題
 

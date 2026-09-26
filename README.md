@@ -2,6 +2,12 @@
 
 施設名や地図から範囲を選び、その範囲と交差する CityGML ファイルと参照データを取得する Unity Editor 用 UPM パッケージです。取得した都市フォルダを公式 PLATEAU SDK for Unity で選び、座標系や LOD などを指定してインポートします。
 
+![公式PLATEAU SDKで取り込んだ港区2025年の都市モデルをUnity Game Viewに表示した状態](Documentation~/media/game-view-city-model.png)
+
+画面例は東京タワー周辺の取得データを公式 SDK 4.3.0 で読み込み、Unity の保存・再起動後に表示したものです。実際の取得と SDK への受け渡しは[図付き操作ガイド](Documentation~/user-guide.md)と[操作動画](Documentation~/media/area-downloader-demo.mp4)で確認できます。
+
+都市モデル画像の出典は[3D都市モデル（Project PLATEAU）港区（2025年度）](https://www.geospatial.jp/ckan/dataset/plateau-13103-minato-ku-2025)です。データセットの選択可能なライセンスから CC BY 4.0 を選び、CityGML を Unity で可視化して撮影しました。[画像と第三者データの条件](THIRD_PARTY_NOTICES.md)も参照してください。
+
 ## 1. できることと確認済みの結果
 
 施設を検索するか地図・経緯度で範囲を決め、建築物・道路・地形の CityGML を取得できます。取得後は都市別フォルダを公式 SDK に渡します。東京タワー周辺のデータを現行の公開候補から公式 SDK 4.3.0 の公開 API で再インポートし、建築物・道路・地形を Scene View と Game View で確認しました。保存したシーンは Unity 再起動後も表示できました。SDK の GUI では都市フォルダの受理まで確認し、範囲指定とインポートは API 経路で検証しています。詳しい条件と限界は[検証記録](Documentation~/validation-urp-2026-09-26.md)と[Issue #3](https://github.com/zabaglione/plateau-area-downloader/issues/3)を参照してください。
@@ -23,6 +29,10 @@
 3. 左上の **＋ → Install package from tarball...** を選び、取得した `.tgz` を指定します。
 4. Package Manager に `PLATEAU SDK for Unity` が表示されることを確認します。
 
+![公式PLATEAU SDK 4.3.0をtarballから導入したPackage Manager](Documentation~/media/package-manager-sdk-install.png)
+
+[Package Manager の文字を原寸で見る](Documentation~/media/package-manager-sdk-install.png)
+
 ### 既知の問題: SDK 4.3.0 の UXML エラー
 
 公式 SDK `4.3.0` の配布物では、初回アセット取込時に `RoadNetworkEditor.uxml` が未定義の `PLATEAU.Editor.RoadNetwork.RoadNetworkEditMode` を参照し、`TypeLoadException` が Console に出る事例を確認しています。新規プロジェクト 2 件で各 1 回発生し、該当 UXML の強制再インポートでも再現しました。SDK 導入後、本パッケージを加える前から発生し、公式 SDK 側の問題とみられます。SDK 本体は変更していません。Unity 再起動後に Console の件数が 0 でも、初回エラーが解消したとは扱っていません。
@@ -39,6 +49,14 @@ https://github.com/zabaglione/plateau-area-downloader.git#v0.1.0
 
 正式公開後の利用者向け URL です。公開前の検証で未作成の `v0.1.0` タグを使わず、検証対象のコミット SHA とリポジトリへのアクセス権を確認してください。導入後は **Tools → PLATEAU Area Downloader** から開きます。[Unity の Git URL 導入手順](https://docs.unity3d.com/ja/6000.0/Manual/upm-ui-giturl.html)も参照できます。
 
+公開前には別の一時プロジェクトで、公式 SDK の tarball を先に追加し、本ツールの非公開 Git URL を後から追加する二段階導入に成功しました。Package Manager は本ツールを `Git` 取得元として表示しました。[導入の検証記録](Documentation~/validation-upm-2026-09-26.md)を参照してください。
+
+![公開前の候補SHAから本ツールをGit URLで導入したPackage Manager](Documentation~/media/package-manager-git-install.png)
+
+[Package Manager の文字を原寸で見る](Documentation~/media/package-manager-git-install.png)
+
+画像の導入元は公開前の候補コミット `6774dee` です。上記の `v0.1.0` は正式公開後に使うタグです。
+
 ## 5. 施設を検索する
 
 ウィンドウの「施設名」に地名や施設名を入力して「検索」を押し、候補の住所や種別を確認して選びます。同名候補がある場合は所在地を確認してください。候補を選ぶと地図が移動し、選択中のデータ種別で検索が始まります。候補が見つからなくても地図や経緯度から範囲を指定できます。施設検索には Photon と OpenStreetMap のデータを使います。
@@ -52,8 +70,6 @@ https://github.com/zabaglione/plateau-area-downloader.git#v0.1.0
 右側の「検索するデータ種別」で「建築物」「道路」「地形」を選び、「CityGMLファイルを検索」を押します。紫色の番号付き枠は詳細区画、薄紫色の枠は広域区画です。地図に表示する区画は最大 100 件ですが、検索結果には全体の区画数とファイル数が表示されます。区画はおおむね約 1 km 単位の地域メッシュです。
 
 ![広い範囲の検索結果。15件のCityGMLファイルが見つかった状態](Documentation~/media/wide-range-results.png)
-
-![経緯度を入力した状態。反映前なので右側の検索結果は入力前のまま](Documentation~/media/coordinates-entered.png)
 
 ![入力範囲を反映し、検索結果が消えた状態](Documentation~/media/range-applied-before-search.png)
 
@@ -73,8 +89,6 @@ https://github.com/zabaglione/plateau-area-downloader.git#v0.1.0
 
 ![取得内容の検証完了と、SDKに渡す都市フォルダのパス](Documentation~/media/download-complete-sdk-path.png)
 
-![都市フォルダのパスをコピーした後の案内](Documentation~/media/sdk-path-copied.png)
-
 中断または失敗した場合、安全に削除できる ZIP・`.part`・`staging` は自動で整理し、再実行に使う `manifest.json` と以前に完成した `dataset` は残します。再実行では完成済みデータの整合性を確認して再利用します。未完了 ZIP は先頭から再取得し、通信途中のバイト位置からは再開しません。Unity の強制終了で途中ファイルが残ったときも、同じジョブの次回実行時に整理します。削除に失敗した場合は Console の警告と表示された保存先を確認してください。置換処理の中断で `dataset` と `dataset.previous` が両方残った場合は、安全のため自動復旧を停止します。
 
 ## 8. 都市フォルダを公式 SDK で選ぶ
@@ -82,8 +96,6 @@ https://github.com/zabaglione/plateau-area-downloader.git#v0.1.0
 取得完了後、「パスをコピーしてSDKを開く」を押します。複数都市がある場合は使う都市のボタンを選びます。公式 SDK の **インポート → 都市の追加 → ローカル → 入力フォルダ → 参照...** を開きます。
 
 Mac のフォルダ選択画面では **⌘⇧G** を押し、コピーしたパスを貼り付けて移動します。`udx` が直下にある都市フォルダを選択してください。`dataset` 全体や `udx` 自体は選びません。
-
-![選択する都市フォルダの内容。直下にudxがある](Documentation~/media/city-folder-contents.png)
 
 ![公式SDKのローカル入力欄に都市フォルダを指定した状態](Documentation~/media/sdk-local-folder-input.png)
 
@@ -108,6 +120,8 @@ Windows でのフォルダ選択は実機未検証です。
 本ガイドの動画と画像が示す SDK の GUI 操作は都市フォルダを受け付けるところまでです。現行候補から取得したデータのインポート完了と再起動後の表示は、SDK の公開 API 経由で検証しました。GUI の「モデルをインポート」完了までは実操作で確認していません。
 
 インポート後は Scene View と Game View で建築物・道路・地形を確認します。Hierarchy でモデル、Inspector で参照やマテリアルを確認し、Console に Error / Exception / Assert がないか、Missing Script、欠落マテリアル、ピンク表示がないか点検してください。現行候補での保存と Unity 再起動後の結果は[検証記録](Documentation~/validation-urp-2026-09-26.md)に記載しています。
+
+![公式SDKから取り込んだ港区の都市モデルをUnity Scene Viewで表示した状態](Documentation~/media/scene-view-city-model.png)
 
 ## 10. 困ったとき
 
