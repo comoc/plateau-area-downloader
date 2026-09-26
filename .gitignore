@@ -7,3 +7,8 @@ Builds/
 Logs/
 UserSettings/
 PLATEAUData~/
+!Documentation~/
+Documentation~/*
+!Documentation~/user-guide.md
+!Documentation~/media/
+!Documentation~/media/**
