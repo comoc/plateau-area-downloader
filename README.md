@@ -10,9 +10,11 @@
 
 ## 1. できることと確認済みの結果
 
-施設を検索するか地図・経緯度で範囲を決め、建築物・道路・地形の CityGML を取得できます。取得後は都市別フォルダを公式 SDK に渡します。東京タワー周辺のデータを現行の公開候補から公式 SDK 4.3.0 の公開 API で再インポートし、建築物・道路・地形を Scene View と Game View で確認しました。保存したシーンは Unity 再起動後も表示できました。SDK の GUI では都市フォルダの受理まで確認し、範囲指定とインポートは API 経路で検証しています。詳しい条件と限界は[検証記録](Documentation~/validation-urp-2026-09-26.md)と[Issue #3](https://github.com/zabaglione/plateau-area-downloader/issues/3)を参照してください。
+施設を検索するか地図・経緯度で範囲を決め、建築物・道路・地形の CityGML を取得できます。取得後は都市別フォルダを公式 SDK に渡します。東京タワー周辺のデータを `v0.1.0` 公開前の候補コミットから公式 SDK 4.3.0 の公開 API で再インポートし、建築物・道路・地形を Scene View と Game View で確認しました。保存したシーンは Unity 再起動後も表示できました。SDK の GUI では都市フォルダの受理まで確認し、範囲指定とインポートは API 経路で検証しています。詳しい条件と限界は[検証記録](Documentation~/validation-urp-2026-09-26.md)と[Issue #3](https://github.com/zabaglione/plateau-area-downloader/issues/3)を参照してください。
 
 検証環境は Unity `6000.3.10f1`、Universal 3D / URP `17.3.0`、PLATEAU SDK `4.3.0` です。HDRP は導入していません。検証は macOS で行い、Windows 実機は未検証です。
+
+`v0.1.1` ではウィンドウを小さくできるようにし、幅が狭いときは地図と検索パネルを縦に並べます。このレイアウト変更は静的検査までで、Unity Editor 上の表示と操作は未検証です。
 
 ## 2. 必要な環境
 
@@ -44,18 +46,18 @@
 公式 SDK の後に、Package Manager の **＋ → Install package from git URL...** を選び、次の URL を指定します。
 
 ```text
-https://github.com/zabaglione/plateau-area-downloader.git#v0.1.0
+https://github.com/zabaglione/plateau-area-downloader.git#v0.1.1
 ```
 
-正式公開後の利用者向け URL です。公開前の検証で未作成の `v0.1.0` タグを使わず、検証対象のコミット SHA とリポジトリへのアクセス権を確認してください。導入後は **Tools → PLATEAU Area Downloader** から開きます。[Unity の Git URL 導入手順](https://docs.unity3d.com/ja/6000.0/Manual/upm-ui-giturl.html)も参照できます。
+導入後は **Tools → PLATEAU Area Downloader** から開きます。[Unity の Git URL 導入手順](https://docs.unity3d.com/ja/6000.0/Manual/upm-ui-giturl.html)も参照できます。
 
-公開前には別の一時プロジェクトで、公式 SDK の tarball を先に追加し、本ツールの非公開 Git URL を後から追加する二段階導入に成功しました。Package Manager は本ツールを `Git` 取得元として表示しました。[導入の検証記録](Documentation~/validation-upm-2026-09-26.md)を参照してください。
+`v0.1.0` 公開前には別の一時プロジェクトで、公式 SDK の tarball を先に追加し、本ツールの非公開 Git URL を後から追加する二段階導入に成功しました。Package Manager は本ツールを `Git` 取得元として表示しました。[導入の検証記録](Documentation~/validation-upm-2026-09-26.md)を参照してください。
 
 ![公開前の候補SHAから本ツールをGit URLで導入したPackage Manager](Documentation~/media/package-manager-git-install.png)
 
 [Package Manager の文字を原寸で見る](Documentation~/media/package-manager-git-install.png)
 
-画像の導入元は公開前の候補コミット `6774dee` です。上記の `v0.1.0` は正式公開後に使うタグです。
+画像の導入元は `v0.1.0` 公開前の候補コミット `6774dee` です。`v0.1.1` の導入結果を示す画像ではありません。
 
 ## 5. 施設を検索する
 
@@ -67,7 +69,7 @@ https://github.com/zabaglione/plateau-area-downloader.git#v0.1.0
 
 地図をドラッグして移動し、ホイールまたはトラックパッドの縦スクロールで拡大縮小します。「拡大縮小の速さ」は同じ端末の Unity Editor 設定に保存されます。**Shift＋ドラッグ**で青い指定範囲を描きます。経緯度を直接入力したときは「反映」を押してください。
 
-右側の「検索するデータ種別」で「建築物」「道路」「地形」を選び、「CityGMLファイルを検索」を押します。紫色の番号付き枠は詳細区画、薄紫色の枠は広域区画です。地図に表示する区画は最大 100 件ですが、検索結果には全体の区画数とファイル数が表示されます。区画はおおむね約 1 km 単位の地域メッシュです。
+地図の右側（狭いウィンドウでは下側）の「検索するデータ種別」で「建築物」「道路」「地形」を選び、「CityGMLファイルを検索」を押します。紫色の番号付き枠は詳細区画、薄紫色の枠は広域区画です。地図に表示する区画は最大 100 件ですが、検索結果には全体の区画数とファイル数が表示されます。区画はおおむね約 1 km 単位の地域メッシュです。
 
 ![広い範囲の検索結果。15件のCityGMLファイルが見つかった状態](Documentation~/media/wide-range-results.png)
 
@@ -117,9 +119,9 @@ Windows でのフォルダ選択は実機未検証です。
 
 本パッケージのボタンはインポート設定やインポート処理を行いません。公式 SDK では、インポート形式と基準座標系を選び、「範囲選択」で対象の地域メッシュを指定し、範囲選択画面の「決定」を押します。元のシーンで種類・LOD・テクスチャなどを確認して「モデルをインポート」を押します。詳しくは[公式 SDK 4.3.0 のインポート手順](https://github.com/Project-PLATEAU/PLATEAU-SDK-for-Unity/blob/v4.3.0/Documentation~/manual/ImportCityModels.md)と[図付きの操作ガイド](Documentation~/user-guide.md)を参照してください。
 
-本ガイドの動画と画像が示す SDK の GUI 操作は都市フォルダを受け付けるところまでです。現行候補から取得したデータのインポート完了と再起動後の表示は、SDK の公開 API 経由で検証しました。GUI の「モデルをインポート」完了までは実操作で確認していません。
+本ガイドの動画と画像が示す SDK の GUI 操作は都市フォルダを受け付けるところまでです。`v0.1.0` 公開前の候補から取得したデータのインポート完了と再起動後の表示は、SDK の公開 API 経由で検証しました。GUI の「モデルをインポート」完了までは実操作で確認していません。
 
-インポート後は Scene View と Game View で建築物・道路・地形を確認します。Hierarchy でモデル、Inspector で参照やマテリアルを確認し、Console に Error / Exception / Assert がないか、Missing Script、欠落マテリアル、ピンク表示がないか点検してください。現行候補での保存と Unity 再起動後の結果は[検証記録](Documentation~/validation-urp-2026-09-26.md)に記載しています。
+インポート後は Scene View と Game View で建築物・道路・地形を確認します。Hierarchy でモデル、Inspector で参照やマテリアルを確認し、Console に Error / Exception / Assert がないか、Missing Script、欠落マテリアル、ピンク表示がないか点検してください。`v0.1.0` 公開前の候補での保存と Unity 再起動後の結果は[検証記録](Documentation~/validation-urp-2026-09-26.md)に記載しています。
 
 ![公式SDKから取り込んだ港区の都市モデルをUnity Scene Viewで表示した状態](Documentation~/media/scene-view-city-model.png)
 

@@ -1,6 +1,6 @@
 {
   "name": "com.zabaglione.plateau-area-downloader",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "displayName": "PLATEAU Area Downloader",
   "description": "Find a place, download nearby CityGML files, and hand their folders to PLATEAU SDK for Unity.",
   "unity": "6000.3",
