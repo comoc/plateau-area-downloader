@@ -243,6 +243,34 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             return await response.Content.ReadAsByteArrayAsync();
         }
 
+        internal static async Task<GoogleTileSession> CreateGoogleSessionAsync(
+            string mapType, string apiKey, CancellationToken token)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post,
+                GoogleMapTiles.Base + "/v1/createSession?key=" + Uri.EscapeDataString(apiKey));
+            request.Content = new StringContent(GoogleMapTiles.SessionRequestJson(mapType),
+                Encoding.UTF8, "application/json");
+            var session = JsonUtility.FromJson<GoogleTileSession>(await SendGoogleAsync(request, token));
+            if (string.IsNullOrEmpty(session?.session)) throw new InvalidOperationException("Invalid session response.");
+            return session;
+        }
+
+        internal static async Task<string> GetGoogleCopyrightAsync(string url, CancellationToken token)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            return JsonUtility.FromJson<GoogleViewportInfo>(await SendGoogleAsync(request, token))?.copyright ?? "";
+        }
+
+        // Errors omit the URL so the API key never reaches the UI or logs.
+        private static async Task<string> SendGoogleAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            using var response = await Client.SendAsync(request, token);
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+                throw new HttpRequestException("HTTP " + (int)response.StatusCode + " " + GoogleMapTiles.ErrorMessage(body));
+            return body;
+        }
+
         private static async Task<string> GetStringAsync(string url, CancellationToken token)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
