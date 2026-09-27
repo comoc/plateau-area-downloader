@@ -115,19 +115,12 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         private static void Open()
         {
             var window = GetWindow<AreaDownloaderWindow>("PLATEAU Area Downloader");
-            window.minSize = new Vector2(900, 740);
-            if (window.position.width < 900)
-            {
-                var position = window.position;
-                position.width = 960;
-                position.height = 900;
-                window.position = position;
-            }
             window.Show();
         }
 
         private void OnEnable()
         {
+            minSize = new Vector2(560, 420);
             bounds = GeoBounds.FromCenter(centerLatitude, centerLongitude);
             targetZoom = zoom;
             zoomAnimating = false;
@@ -189,6 +182,9 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             handoffResult = Q<Label>("handoff-result");
             handoffCities = Q<VisualElement>("handoff-cities");
             searchField = Q<TextField>("search");
+            var page = Q<ScrollView>("scroll");
+            page.RegisterCallback<GeometryChangedEvent>(e =>
+                page.EnableInClassList("narrow", e.newRect.width < 760));
             searchField.value = placeName;
             Q<TextField>("photon-url").value = EditorPrefs.GetString(Prefs + "photon", PlateauApi.DefaultPhotonBase);
             Q<TextField>("api-url").value = EditorPrefs.GetString(Prefs + "api", PlateauApi.DefaultApiBase);
