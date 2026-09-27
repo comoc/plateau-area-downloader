@@ -93,6 +93,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         [SerializeField] private bool includeBuildings = true;
         [SerializeField] private bool includeRoads;
         [SerializeField] private bool includeTerrain;
+        [SerializeField] private List<string> additionalTypes = new List<string>();
         [SerializeField] private bool hasSelectionState;
         private PackManifest desired;
         private PackManifest downloaded;
@@ -114,8 +115,24 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         [MenuItem("Tools/PLATEAU Area Downloader")]
         private static void Open()
         {
-            var window = GetWindow<AreaDownloaderWindow>("PLATEAU Area Downloader");
-            window.Show();
+            var window = Resources.FindObjectsOfTypeAll<AreaDownloaderWindow>().FirstOrDefault();
+            if (window == null)
+            {
+                window = GetWindow<AreaDownloaderWindow>("PLATEAU Area Downloader");
+                window.Show();
+            }
+            window.Focus();
+            window.RefreshOnMenuOpen();
+        }
+
+        private void RefreshOnMenuOpen()
+        {
+            if (map == null || map.panel == null) return;
+            foreach (var request in tileRequests.Values) request.Cancellation.Cancel();
+            tileRequests.Clear();
+            RefreshMap();
+            UpdateDownloadSelection();
+            Repaint();
         }
 
         private void OnEnable()
@@ -221,19 +238,28 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             map.RegisterCallback<PointerMoveEvent>(OnPointerMove);
             map.RegisterCallback<PointerUpEvent>(OnPointerUp);
             map.RegisterCallback<WheelEvent>(OnWheel);
-            foreach (var name in new[] { "bldg", "tran", "dem" })
+            var typeChoices = Q<ScrollView>("type-choices");
+            foreach (var (name, label) in CityGmlTypes.All)
             {
-                var toggle = Q<Toggle>(name);
-                toggle.SetValueWithoutNotify(name == "bldg" ? includeBuildings :
-                    name == "tran" ? includeRoads : includeTerrain);
+                var toggle = new Toggle(label) { name = name };
+                toggle.SetValueWithoutNotify(IsTypeSelected(name));
+                typeChoices.Add(toggle);
                 toggle.RegisterValueChangedCallback(e =>
                 {
                     if (name == "bldg") includeBuildings = e.newValue;
                     else if (name == "tran") includeRoads = e.newValue;
-                    else includeTerrain = e.newValue;
+                    else if (name == "dem") includeTerrain = e.newValue;
+                    else
+                    {
+                        additionalTypes ??= new List<string>();
+                        if (e.newValue && !additionalTypes.Contains(name)) additionalTypes.Add(name);
+                        if (!e.newValue) additionalTypes.Remove(name);
+                    }
                     InvalidatePreview();
                 });
             }
+            Q<Button>("select-all-types").clicked += () => SetAllTypes(true);
+            Q<Button>("clear-types").clicked += () => SetAllTypes(false);
             foreach (var name in new[] { "photon-url", "api-url", "tiles-url", "save-root" })
             {
                 var field = Q<TextField>(name);
@@ -250,6 +276,21 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         }
 
         private T Q<T>(string name) where T : VisualElement => rootVisualElement.Q<T>(name);
+        private bool IsTypeSelected(string type) => type == "bldg" ? includeBuildings :
+            type == "tran" ? includeRoads : type == "dem" ? includeTerrain :
+            additionalTypes != null && additionalTypes.Contains(type);
+
+        private void SetAllTypes(bool selected)
+        {
+            foreach (var (code, _) in CityGmlTypes.All)
+                Q<Toggle>(code).SetValueWithoutNotify(selected);
+            includeBuildings = includeRoads = includeTerrain = selected;
+            additionalTypes = selected
+                ? CityGmlTypes.All.Select(item => item.Code)
+                    .Where(code => code != "bldg" && code != "tran" && code != "dem").ToList()
+                : new List<string>();
+            InvalidatePreview();
+        }
         private string ApiBase => Q<TextField>("api-url").value.TrimEnd('/');
         private string DataRoot => Path.GetFullPath(Q<TextField>("save-root").value);
 
@@ -364,13 +405,14 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         {
             var generation = ++previewGeneration;
             var requestedBounds = bounds;
-            var types = new[] { "bldg", "tran", "dem" }.Where(type => Q<Toggle>(type).value).ToArray();
+            var types = CityGmlTypes.All.Select(item => item.Code)
+                .Where(type => Q<Toggle>(type).value).ToArray();
             desired = null;
             UpdateDownloadSelection();
             RefreshOverlay();
             if (types.Length == 0)
             {
-                previewResult.text = "建築物・道路・地形から選んでください。";
+                previewResult.text = "検索するデータ種別を選んでください。";
                 meshSummary.text = "検索するデータ種別を選んでください。";
                 return;
             }
@@ -433,9 +475,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
 
         private static string BuildMeshSummary(SelectedGml[] entries)
         {
-            var names = new Dictionary<string, string> { { "bldg", "建築物" }, { "tran", "道路" }, { "dem", "地形" } };
             var parts = entries.GroupBy(entry => entry.type)
-                .Select(group => (name: names.TryGetValue(group.Key, out var label) ? label : group.Key,
+                .Select(group => (name: CityGmlTypes.LabelFor(group.Key),
                     cells: group.Select(entry => JapanMeshCode.GetCatalogBounds(entry.code, entry.url)).Distinct().Count(),
                     files: group.Select(entry => entry.url).Distinct(StringComparer.Ordinal).Count()))
                 .Select(part => part.name + " " + part.cells + "区画 / " + part.files + "ファイル");

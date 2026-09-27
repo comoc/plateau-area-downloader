@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
@@ -131,6 +132,19 @@ namespace Zabaglione.PlateauAreaDownloader.Editor.Tests
             Assert.That(response.cities[0].files.bldg[0].code, Is.EqualTo("52354602"));
             Assert.That(response.cities[0].files.bldg[0].fileSize, Is.EqualTo(59603577));
             Assert.That(response.cities[0].metadataZipUrls[0], Does.EndWith("metadata.zip"));
+        }
+
+        [Test]
+        public void CatalogResponse_ParsesEverySelectableCityGmlType()
+        {
+            foreach (var (code, _) in CityGmlTypes.All)
+            {
+                var json = "{\"cities\":[{\"files\":{\"" + code +
+                    "\":[{\"code\":\"53393580\",\"url\":\"https://example.invalid/" +
+                    code + "/sample.gml\"}]}}]}";
+                var city = JsonUtility.FromJson<CatalogResponse>(json).cities[0];
+                Assert.That(city.FilesFor(code).Single().url, Does.Contain("/" + code + "/"), code);
+            }
         }
 
         [Test]

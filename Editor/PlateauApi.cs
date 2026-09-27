@@ -11,6 +11,27 @@ using UnityEngine;
 
 namespace Zabaglione.PlateauAreaDownloader.Editor
 {
+    internal static class CityGmlTypes
+    {
+        internal static readonly (string Code, string Label)[] All =
+        {
+            ("bldg", "建築物"), ("tran", "道路"), ("dem", "地形"),
+            ("brid", "橋梁"), ("tun", "トンネル"), ("rwy", "鉄道"),
+            ("squr", "広場"), ("trk", "徒歩道"), ("wwy", "航路"),
+            ("frn", "都市設備"), ("cons", "その他の構造物"),
+            ("luse", "土地利用"), ("veg", "植生"), ("wtr", "水部"),
+            ("urf", "都市計画決定情報"), ("area", "区域"),
+            ("fld", "洪水浸水想定区域"), ("ifld", "内水浸水想定区域"),
+            ("htd", "高潮浸水想定区域"), ("tnm", "津波浸水想定区域"),
+            ("lsld", "土砂災害警戒区域"), ("rfld", "ため池ハザードマップ"),
+            ("ubld", "地下街"), ("unf", "地下埋設物"),
+            ("gen", "汎用都市オブジェクト"), ("ext", "拡張製品仕様書の地物")
+        };
+
+        internal static string LabelFor(string code) =>
+            All.FirstOrDefault(item => item.Code == code).Label ?? code;
+    }
+
     [Serializable]
     internal sealed class PhotonResponse
     {
@@ -67,6 +88,29 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 case "bldg": return files.bldg ?? Array.Empty<CatalogGml>();
                 case "tran": return files.tran ?? Array.Empty<CatalogGml>();
                 case "dem": return files.dem ?? Array.Empty<CatalogGml>();
+                case "brid": return files.brid ?? Array.Empty<CatalogGml>();
+                case "tun": return files.tun ?? Array.Empty<CatalogGml>();
+                case "rwy": return files.rwy ?? Array.Empty<CatalogGml>();
+                case "squr": return files.squr ?? Array.Empty<CatalogGml>();
+                case "trk": return files.trk ?? Array.Empty<CatalogGml>();
+                case "wwy": return files.wwy ?? Array.Empty<CatalogGml>();
+                case "frn": return files.frn ?? Array.Empty<CatalogGml>();
+                case "cons": return files.cons ?? Array.Empty<CatalogGml>();
+                case "luse": return files.luse ?? Array.Empty<CatalogGml>();
+                case "veg": return files.veg ?? Array.Empty<CatalogGml>();
+                case "wtr": return files.wtr ?? Array.Empty<CatalogGml>();
+                case "urf": return files.urf ?? Array.Empty<CatalogGml>();
+                case "area": return files.area ?? Array.Empty<CatalogGml>();
+                case "fld": return files.fld ?? Array.Empty<CatalogGml>();
+                case "ifld": return files.ifld ?? Array.Empty<CatalogGml>();
+                case "htd": return files.htd ?? Array.Empty<CatalogGml>();
+                case "tnm": return files.tnm ?? Array.Empty<CatalogGml>();
+                case "lsld": return files.lsld ?? Array.Empty<CatalogGml>();
+                case "rfld": return files.rfld ?? Array.Empty<CatalogGml>();
+                case "ubld": return files.ubld ?? Array.Empty<CatalogGml>();
+                case "unf": return files.unf ?? Array.Empty<CatalogGml>();
+                case "gen": return files.gen ?? Array.Empty<CatalogGml>();
+                case "ext": return files.ext ?? Array.Empty<CatalogGml>();
                 default: return Array.Empty<CatalogGml>();
             }
         }
@@ -78,6 +122,29 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         public CatalogGml[] bldg;
         public CatalogGml[] tran;
         public CatalogGml[] dem;
+        public CatalogGml[] brid;
+        public CatalogGml[] tun;
+        public CatalogGml[] rwy;
+        public CatalogGml[] squr;
+        public CatalogGml[] trk;
+        public CatalogGml[] wwy;
+        public CatalogGml[] frn;
+        public CatalogGml[] cons;
+        public CatalogGml[] luse;
+        public CatalogGml[] veg;
+        public CatalogGml[] wtr;
+        public CatalogGml[] urf;
+        public CatalogGml[] area;
+        public CatalogGml[] fld;
+        public CatalogGml[] ifld;
+        public CatalogGml[] htd;
+        public CatalogGml[] tnm;
+        public CatalogGml[] lsld;
+        public CatalogGml[] rfld;
+        public CatalogGml[] ubld;
+        public CatalogGml[] unf;
+        public CatalogGml[] gen;
+        public CatalogGml[] ext;
     }
 
     [Serializable]

@@ -37,10 +37,10 @@
         <ui:VisualElement class="map-side-panel">
           <ui:Label text="CityGMLファイルを検索" class="heading" />
           <ui:Label text="検索するデータ種別" />
-          <ui:VisualElement class="map-choices">
-            <ui:Toggle name="bldg" text="建築物" value="true" />
-            <ui:Toggle name="tran" text="道路" />
-            <ui:Toggle name="dem" text="地形" />
+          <ui:ScrollView name="type-choices" class="map-choices" />
+          <ui:VisualElement class="row type-actions">
+            <ui:Button name="select-all-types" text="全選択" />
+            <ui:Button name="clear-types" text="選択解除" />
           </ui:VisualElement>
           <ui:Button name="preview" text="CityGMLファイルを検索" class="primary-action map-search-button" />
           <ui:ScrollView class="map-query-results">

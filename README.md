@@ -10,11 +10,11 @@
 
 ## 1. できることと確認済みの結果
 
-施設を検索するか地図・経緯度で範囲を決め、建築物・道路・地形の CityGML を取得できます。取得後は都市別フォルダを公式 SDK に渡します。東京タワー周辺のデータを `v0.1.0` 公開前の候補コミットから公式 SDK 4.3.0 の公開 API で再インポートし、建築物・道路・地形を Scene View と Game View で確認しました。保存したシーンは Unity 再起動後も表示できました。SDK の GUI では都市フォルダの受理まで確認し、範囲指定とインポートは API 経路で検証しています。詳しい条件と限界は[検証記録](Documentation~/validation-urp-2026-09-26.md)と[Issue #3](https://github.com/zabaglione/plateau-area-downloader/issues/3)を参照してください。
+施設を検索するか地図・経緯度で範囲を決め、選択した種類の CityGML を取得できます。取得後は都市別フォルダを公式 SDK に渡します。東京タワー周辺のデータを `v0.1.0` 公開前の候補コミットから公式 SDK 4.3.0 の公開 API で再インポートし、建築物・道路・地形を Scene View と Game View で確認しました。保存したシーンは Unity 再起動後も表示できました。SDK の GUI では都市フォルダの受理まで確認し、範囲指定とインポートは API 経路で検証しています。詳しい条件と限界は[検証記録](Documentation~/validation-urp-2026-09-26.md)と[Issue #3](https://github.com/zabaglione/plateau-area-downloader/issues/3)を参照してください。
 
 検証環境は Unity `6000.3.10f1`、Universal 3D / URP `17.3.0`、PLATEAU SDK `4.3.0` です。HDRP は導入していません。検証は macOS で行い、Windows 実機は未検証です。
 
-`v0.1.1` ではウィンドウを小さくできるようにし、幅が狭いときは地図と検索パネルを縦に並べます。このレイアウト変更は静的検査までで、Unity Editor 上の表示と操作は未検証です。
+`v0.1.2` では検索対象を26種類に拡張し、メニューの再実行時には既存ウィンドウを前面に出して地図を更新します。Unity Editor 上で種類一覧、橋梁の検索、ウィンドウ再利用を確認しました。[検証記録](Documentation~/validation-editor-2026-09-27.md)に条件と結果を記載しています。
 
 ## 2. 必要な環境
 
@@ -46,10 +46,10 @@
 公式 SDK の後に、Package Manager の **＋ → Install package from git URL...** を選び、次の URL を指定します。
 
 ```text
-https://github.com/zabaglione/plateau-area-downloader.git#v0.1.1
+https://github.com/zabaglione/plateau-area-downloader.git#v0.1.2
 ```
 
-導入後は **Tools → PLATEAU Area Downloader** から開きます。[Unity の Git URL 導入手順](https://docs.unity3d.com/ja/6000.0/Manual/upm-ui-giturl.html)も参照できます。
+導入後は **Tools → PLATEAU Area Downloader** から開きます。メニューを再実行すると開いているウィンドウを前面に出し、地図を再描画します。[Unity の Git URL 導入手順](https://docs.unity3d.com/ja/6000.0/Manual/upm-ui-giturl.html)も参照できます。
 
 `v0.1.0` 公開前には別の一時プロジェクトで、公式 SDK の tarball を先に追加し、本ツールの非公開 Git URL を後から追加する二段階導入に成功しました。Package Manager は本ツールを `Git` 取得元として表示しました。[導入の検証記録](Documentation~/validation-upm-2026-09-26.md)を参照してください。
 
@@ -57,7 +57,7 @@ https://github.com/zabaglione/plateau-area-downloader.git#v0.1.1
 
 [Package Manager の文字を原寸で見る](Documentation~/media/package-manager-git-install.png)
 
-画像の導入元は `v0.1.0` 公開前の候補コミット `6774dee` です。`v0.1.1` の導入結果を示す画像ではありません。
+画像の導入元は `v0.1.0` 公開前の候補コミット `6774dee` です。`v0.1.2` の導入結果を示す画像ではありません。
 
 ## 5. 施設を検索する
 
@@ -69,7 +69,7 @@ https://github.com/zabaglione/plateau-area-downloader.git#v0.1.1
 
 地図をドラッグして移動し、ホイールまたはトラックパッドの縦スクロールで拡大縮小します。「拡大縮小の速さ」は同じ端末の Unity Editor 設定に保存されます。**Shift＋ドラッグ**で青い指定範囲を描きます。経緯度を直接入力したときは「反映」を押してください。
 
-地図の右側（狭いウィンドウでは下側）の「検索するデータ種別」で「建築物」「道路」「地形」を選び、「CityGMLファイルを検索」を押します。紫色の番号付き枠は詳細区画、薄紫色の枠は広域区画です。地図に表示する区画は最大 100 件ですが、検索結果には全体の区画数とファイル数が表示されます。区画はおおむね約 1 km 単位の地域メッシュです。
+地図の右側（狭いウィンドウでは下側）の「検索するデータ種別」で対象を選び、「CityGMLファイルを検索」を押します。紫色の番号付き枠は詳細区画、薄紫色の枠は広域区画です。地図に表示する区画は最大 100 件ですが、検索結果には全体の区画数とファイル数が表示されます。区画はおおむね約 1 km 単位の地域メッシュです。
 
 ![広い範囲の検索結果。15件のCityGMLファイルが見つかった状態](Documentation~/media/wide-range-results.png)
 
@@ -77,7 +77,7 @@ https://github.com/zabaglione/plateau-area-downloader.git#v0.1.1
 
 ![範囲を絞って再検索し、5件のCityGMLファイルが見つかった状態](Documentation~/media/narrow-range-results.png)
 
-範囲または種類を変えたら再検索してください。ダウンロード対象は青い範囲と交差する**ファイル全体**です。CityGML が青い範囲だけに切り詰められるわけではありません。
+建築物・道路・地形のほか、橋梁、鉄道、水部、災害リスクなどを含む26種類から選べます。「全選択」「選択解除」でまとめて切り替えられます。地域に公開データがない種類は検索しても結果に出ません。範囲または種類を変えたら再検索してください。ダウンロード対象は青い範囲と交差する**ファイル全体**です。CityGML が青い範囲だけに切り詰められるわけではありません。
 
 ## 7. データを確認してダウンロードする
 
