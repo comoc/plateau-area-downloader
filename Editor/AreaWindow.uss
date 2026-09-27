@@ -1,4 +1,5 @@
-.page { padding-left: 12px; padding-right: 12px; padding-top: 10px; padding-bottom: 20px; }
+.page { flex-grow: 1; min-height: 0; padding-left: 12px; padding-right: 12px; padding-top: 10px; padding-bottom: 20px; }
+.intro, .section > .unity-label, #candidates .unity-button { white-space: normal; }
 .title { font-size: 18px; -unity-font-style: bold; margin-bottom: 6px; }
 .heading { font-size: 14px; -unity-font-style: bold; margin-bottom: 5px; }
 .section { margin-top: 12px; padding: 10px; border-left-width: 1px; border-right-width: 1px; border-top-width: 1px; border-bottom-width: 1px; border-left-color: #555; border-right-color: #555; border-top-color: #555; border-bottom-color: #555; }
@@ -19,6 +20,10 @@
 .map-column { flex-grow: 1; flex-shrink: 1; min-width: 0; }
 .map { height: 400px; overflow: hidden; background-color: #c1ced0; margin-bottom: 4px; }
 .map-side-panel { width: 28%; min-width: 260px; max-width: 380px; height: 430px; margin-left: 10px; padding: 10px; border-left-width: 1px; border-right-width: 1px; border-top-width: 1px; border-bottom-width: 1px; border-left-color: #666; border-right-color: #666; border-top-color: #666; border-bottom-color: #666; }
+.page.narrow .map-workspace { flex-direction: column; }
+.page.narrow .map-column { flex-grow: 0; }
+.page.narrow .map { height: 320px; }
+.page.narrow .map-side-panel { width: auto; max-width: 100%; margin-left: 0; margin-top: 10px; }
 .primary-action { height: 46px; font-size: 14px; -unity-font-style: bold; background-color: #34689e; color: white; }
 .map-search-button { margin-top: 10px; margin-bottom: 8px; }
 .download-actions { margin-top: 10px; }

@@ -2,7 +2,7 @@
   <ui:Style src="AreaWindow.uss" />
   <ui:ScrollView name="scroll" class="page">
     <ui:Label text="PLATEAU Area Downloader" class="title" />
-    <ui:Label text="施設を探して範囲を選び、CityGMLを取得して公式PLATEAU SDKに渡します。" />
+    <ui:Label text="施設を探して範囲を選び、CityGMLを取得して公式PLATEAU SDKに渡します。" class="intro" />
     <ui:VisualElement class="section">
       <ui:Label text="1. 場所を探す（任意）" class="heading" />
       <ui:VisualElement class="row">
