@@ -250,7 +250,16 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 GoogleMapTiles.Base + "/v1/createSession?key=" + Uri.EscapeDataString(apiKey));
             request.Content = new StringContent(GoogleMapTiles.SessionRequestJson(mapType),
                 Encoding.UTF8, "application/json");
-            var session = JsonUtility.FromJson<GoogleTileSession>(await SendGoogleAsync(request, token));
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(GoogleMapTiles.SessionTimeout);
+            string body;
+            try { body = await SendGoogleAsync(request, timeout.Token); }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                throw new TimeoutException("Session request timed out after " +
+                                           GoogleMapTiles.SessionTimeout.TotalSeconds + " seconds");
+            }
+            var session = JsonUtility.FromJson<GoogleTileSession>(body);
             if (string.IsNullOrEmpty(session?.session)) throw new InvalidOperationException("Invalid session response.");
             return session;
         }

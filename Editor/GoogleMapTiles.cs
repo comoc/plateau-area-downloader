@@ -63,6 +63,9 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             long.TryParse(session.expiry, NumberStyles.Integer, CultureInfo.InvariantCulture, out var expiry) &&
             now.ToUnixTimeSeconds() < expiry - 3600;
 
+        // Shorter than the shared HttpClient timeout so a stalled request surfaces as a retryable failure.
+        internal static readonly TimeSpan SessionTimeout = TimeSpan.FromSeconds(15);
+
         // A failed session is kept briefly so every visible tile does not repeat the same failing request.
         internal static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(10);
 
