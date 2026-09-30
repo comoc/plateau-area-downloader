@@ -63,6 +63,11 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             long.TryParse(session.expiry, NumberStyles.Integer, CultureInfo.InvariantCulture, out var expiry) &&
             now.ToUnixTimeSeconds() < expiry - 3600;
 
+        // A failed session is kept briefly so every visible tile does not repeat the same failing request.
+        internal static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(10);
+
+        internal static bool CanRetry(DateTimeOffset failedAt, DateTimeOffset now) => now - failedAt >= RetryDelay;
+
         internal static string ErrorMessage(string body)
         {
             try { return JsonUtility.FromJson<GoogleErrorResponse>(body)?.error?.message ?? ""; }

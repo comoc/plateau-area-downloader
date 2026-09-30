@@ -50,6 +50,14 @@ namespace Zabaglione.PlateauAreaDownloader.Editor.Tests
         }
 
         [Test]
+        public void CanRetry_WaitsForRetryDelayAfterFailure()
+        {
+            var failedAt = DateTimeOffset.FromUnixTimeSeconds(1000);
+            Assert.That(GoogleMapTiles.CanRetry(failedAt, failedAt.AddSeconds(9.9)), Is.False);
+            Assert.That(GoogleMapTiles.CanRetry(failedAt, failedAt.AddSeconds(10)), Is.True);
+        }
+
+        [Test]
         public void ErrorMessage_ExtractsGoogleErrorMessageOrFallsBack()
         {
             Assert.That(GoogleMapTiles.ErrorMessage(

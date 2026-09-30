@@ -92,6 +92,8 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         private string googleMapType = "roadmap";
         private Task<GoogleTileSession> googleSessionTask;
         private string googleSessionIdentity;
+        private DateTimeOffset googleSessionFailedAt;
+        private CancellationTokenSource googleCancellation = new CancellationTokenSource();
         private IVisualElementScheduledItem attributionUpdate;
         private int attributionGeneration;
         private int previewGeneration;
@@ -151,6 +153,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             bounds = GeoBounds.FromCenter(centerLatitude, centerLongitude);
             targetZoom = zoom;
             zoomAnimating = false;
+            if (googleCancellation.IsCancellationRequested) googleCancellation = new CancellationTokenSource();
             EditorApplication.update += DrainProgress;
             EditorApplication.update += TickZoom;
         }
@@ -163,6 +166,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             operation?.Dispose();
             foreach (var request in tileRequests.Values) request.Cancellation.Cancel();
             tileRequests.Clear();
+            googleCancellation.Cancel();
             foreach (var texture in tileTextures.Values)
                 if (texture != null) DestroyImmediate(texture);
             tileTextures.Clear();
@@ -837,6 +841,10 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             foreach (var texture in tileTextures.Values)
                 if (texture != null) DestroyImmediate(texture);
             tileTextures.Clear();
+            // Pending Google requests belong to the previous source and must not delay the next one.
+            googleCancellation.Cancel();
+            googleCancellation.Dispose();
+            googleCancellation = new CancellationTokenSource();
             googleSessionTask = null;
             googleSessionIdentity = null;
             UpdateMapSource();
@@ -878,20 +886,24 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             var apiKey = GoogleApiKey;
             if (string.IsNullOrEmpty(apiKey)) throw new InvalidOperationException("Google Maps API key is not set.");
             var identity = googleMapType + "\n" + apiKey;
+            var now = DateTimeOffset.UtcNow;
             if (googleSessionTask != null && googleSessionIdentity == identity &&
-                (!googleSessionTask.IsCompletedSuccessfully ||
-                 GoogleMapTiles.IsUsable(googleSessionTask.Result, DateTimeOffset.UtcNow)))
+                (!googleSessionTask.IsCompleted ||
+                 (googleSessionTask.IsCompletedSuccessfully
+                     ? GoogleMapTiles.IsUsable(googleSessionTask.Result, now)
+                     : !GoogleMapTiles.CanRetry(googleSessionFailedAt, now))))
                 return googleSessionTask;
             googleSessionIdentity = identity;
-            googleSessionTask = CreateGoogleSessionAsync(googleMapType, apiKey, identity);
+            googleSessionTask = CreateGoogleSessionAsync(googleMapType, apiKey, identity, googleCancellation.Token);
             return googleSessionTask;
         }
 
-        private async Task<GoogleTileSession> CreateGoogleSessionAsync(string mapType, string apiKey, string identity)
+        private async Task<GoogleTileSession> CreateGoogleSessionAsync(string mapType, string apiKey, string identity,
+            CancellationToken token)
         {
             try
             {
-                var session = await PlateauApi.CreateGoogleSessionAsync(mapType, apiKey, CancellationToken.None);
+                var session = await PlateauApi.CreateGoogleSessionAsync(mapType, apiKey, token);
                 if (googleSessionIdentity == identity)
                 {
                     ShowMapMessage(null);
@@ -901,9 +913,10 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
             }
             catch (Exception error)
             {
-                if (googleSessionIdentity == identity)
+                googleSessionFailedAt = DateTimeOffset.UtcNow;
+                if (googleSessionIdentity == identity && !token.IsCancellationRequested)
                     ShowMapMessage("Google Maps のタイルを取得できませんでした: " + error.Message +
-                                   "。API キーと Map Tiles API の有効化を確認してください。");
+                                   "。API キーと Map Tiles API の有効化を確認してください。地図を動かすと再試行します。");
                 throw;
             }
         }
@@ -927,7 +940,7 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
                 Math.Min(180, southEast.longitude), northWest.latitude);
             try
             {
-                var copyright = await PlateauApi.GetGoogleCopyrightAsync(url, CancellationToken.None);
+                var copyright = await PlateauApi.GetGoogleCopyrightAsync(url, googleCancellation.Token);
                 if (generation == attributionGeneration && task == googleSessionTask) SetMapAttribution(copyright);
             }
             catch { /* The previous attribution stays until the next successful viewport request. */ }
@@ -991,13 +1004,14 @@ namespace Zabaglione.PlateauAreaDownloader.Editor
         {
             try
             {
+                // Wait for the session before taking a slot so a slow session cannot block other tiles.
+                var url = UseGoogle
+                    ? GoogleMapTiles.TileUrl(key, (await EnsureGoogleSessionAsync()).session, GoogleApiKey)
+                    : Q<TextField>("tiles-url").value.TrimEnd('/') + "/" + key + ".png";
                 await tileDownloadSlots.WaitAsync(request.Cancellation.Token);
                 byte[] bytes;
                 try
                 {
-                    var url = UseGoogle
-                        ? GoogleMapTiles.TileUrl(key, (await EnsureGoogleSessionAsync()).session, GoogleApiKey)
-                        : Q<TextField>("tiles-url").value.TrimEnd('/') + "/" + key + ".png";
                     bytes = await PlateauApi.GetTileAsync(url, request.Cancellation.Token);
                 }
                 finally { tileDownloadSlots.Release(); }
